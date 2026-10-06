@@ -393,6 +393,9 @@ pytest
 The style parsing and validation in `visio_mcp_server/styles.py` is tested without Visio.
 Everything else needs Visio installed.
 
+See [CHANGELOG.md](CHANGELOG.md) for what changed and the known issues, and
+[docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md) for the Visio automation pitfalls behind the code.
+
 ## Troubleshooting
 
 ### Common Issues:
