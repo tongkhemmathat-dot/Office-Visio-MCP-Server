@@ -121,6 +121,13 @@ def close_visio_app():
     
     open_documents = {}
     
+    for doc in list(stencil_documents.values()):
+        try:
+            doc.Close()
+        except Exception:
+            pass
+    stencil_documents.clear()
+    
     # Then quit Visio
     if visio_app:
         try:
@@ -392,6 +399,158 @@ async def close_document(file_path: str, save_changes: Optional[bool] = True) ->
             return f"Document {resolve_path(file_path)} is not currently open"
     except Exception as e:
         return f"Error closing document: {str(e)}"
+
+STENCIL_EXTENSIONS = (".vssx", ".vss", ".vssm")
+visOpenRO = 2
+visOpenHidden = 64
+stencil_documents = {}
+
+def stencil_search_dirs() -> List[str]:
+    """Directories searched for stencil files: Visio's own content and the user's My Shapes."""
+    app = get_visio_app()
+    dirs = [os.path.join(app.Path, "Visio Content")]
+    dirs.append(os.path.join(os.path.expandvars(r"%USERPROFILE%\Documents"), "My Shapes"))
+    for p in (app.StencilPaths or "").split(";"):
+        if p:
+            dirs.append(p)
+    return [d for d in dirs if os.path.isdir(d)]
+
+def find_stencil_files() -> List[str]:
+    """All stencil files found in the search directories."""
+    files = []
+    for d in stencil_search_dirs():
+        for root, _, names in os.walk(d):
+            for n in names:
+                if n.lower().endswith(STENCIL_EXTENSIONS):
+                    files.append(os.path.join(root, n))
+    return sorted(files)
+
+def resolve_stencil(stencil: str) -> str:
+    """Resolve a stencil file path or a name such as 'SERVER_U' / 'server_u.vssx'."""
+    if os.path.isfile(stencil):
+        return os.path.abspath(stencil)
+    wanted = stencil.lower()
+    files = find_stencil_files()
+    exact = [f for f in files if os.path.basename(f).lower() == wanted
+             or os.path.splitext(os.path.basename(f))[0].lower() == wanted]
+    # Prefer the .vssx file when both formats exist
+    exact.sort(key=lambda f: not f.lower().endswith(".vssx"))
+    if exact:
+        return exact[0]
+    partial = [f for f in files if wanted in os.path.basename(f).lower()]
+    if len(partial) == 1:
+        return partial[0]
+    if partial:
+        names = ", ".join(os.path.basename(f) for f in partial[:10])
+        raise ValueError(f"Stencil '{stencil}' is ambiguous. Matches: {names}")
+    raise FileNotFoundError(f"Stencil not found: {stencil}. Use list_stencils to see what is available.")
+
+def get_stencil(stencil: str):
+    """Open a stencil read-only and hidden (cached) and return its Document."""
+    path = resolve_stencil(stencil)
+    key = os.path.normcase(path)
+    doc = stencil_documents.get(key)
+    if doc is not None:
+        try:
+            _ = doc.Name
+            return doc
+        except Exception:
+            del stencil_documents[key]
+    doc = get_visio_app().Documents.OpenEx(path, visOpenRO | visOpenHidden)
+    stencil_documents[key] = doc
+    return doc
+
+def find_master(stencil_doc, master: str):
+    """Find a master by local or universal name, case-insensitively."""
+    try:
+        return stencil_doc.Masters.Item(master)
+    except Exception:
+        pass
+    wanted = master.lower()
+    for m in stencil_doc.Masters:
+        if m.Name.lower() == wanted or m.NameU.lower() == wanted:
+            return m
+    raise KeyError(f"Master '{master}' not found in stencil '{stencil_doc.Name}'. Use list_stencil_masters.")
+
+@mcp.tool()
+async def list_stencils(query: Optional[str] = None) -> str:
+    """List the Visio stencils available on this machine.
+
+    Args:
+        query: Optional case-insensitive text to filter by file name
+               (e.g. "server", "network", "flowchart").
+
+    Returns:
+        JSON list of stencils with their name and path.
+    """
+    try:
+        files = find_stencil_files()
+        if query:
+            files = [f for f in files if query.lower() in os.path.basename(f).lower()]
+        return json.dumps([{"name": os.path.splitext(os.path.basename(f))[0], "path": f} for f in files], indent=2)
+    except Exception as e:
+        return f"Error listing stencils: {str(e)}"
+
+@mcp.tool()
+async def list_stencil_masters(stencil: str) -> str:
+    """List the shapes (masters) in a stencil.
+
+    Args:
+        stencil: Stencil name (e.g. "SERVER_U") or full path to a stencil file.
+
+    Returns:
+        JSON list of master names in the stencil.
+    """
+    try:
+        stencil_doc = get_stencil(stencil)
+        return json.dumps({"stencil": stencil_doc.Name,
+                           "masters": [m.Name for m in stencil_doc.Masters]}, indent=2)
+    except Exception as e:
+        return f"Error listing stencil masters: {str(e)}"
+
+@mcp.tool()
+async def add_stencil_shape(file_path: str, stencil: str, master: str, x: float, y: float,
+                            text: Optional[str] = None,
+                            width: Optional[float] = None, height: Optional[float] = None) -> str:
+    """Add a shape from a stencil (e.g. a server, router or flowchart symbol) to a document.
+
+    Args:
+        file_path: Path to the Visio file.
+        stencil: Stencil name (e.g. "SERVER_U") or full path to a stencil file.
+        master: Name of the shape in the stencil (see list_stencil_masters).
+        x: X-coordinate of the shape's centre, in inches.
+        y: Y-coordinate of the shape's centre, in inches.
+        text: Optional label for the shape.
+        width: Optional width in inches (default: the stencil's own size).
+        height: Optional height in inches (default: the stencil's own size).
+
+    Returns:
+        Result message including the new shape's ID.
+    """
+    try:
+        if not os.path.exists(resolve_path(file_path)):
+            creation_result = await create_visio_file(save_path=file_path)
+            if "Error" in creation_result:
+                return f"Cannot add shape - file does not exist and could not be created: {creation_result}"
+
+        doc = get_document(file_path)
+        page = get_page(doc)
+        stencil_doc = get_stencil(stencil)
+        master_obj = find_master(stencil_doc, master)
+
+        shape = page.Drop(master_obj, x, y)
+        if width is not None:
+            shape.Cells("Width").FormulaU = f"{width} in"
+        if height is not None:
+            shape.Cells("Height").FormulaU = f"{height} in"
+        if text is not None:
+            shape.Text = text
+
+        doc.Save()
+
+        return f"Shape '{master_obj.Name}' from '{stencil_doc.Name}' added at ({x}, {y}) with ID {shape.ID}"
+    except Exception as e:
+        return f"Error adding stencil shape: {str(e)}"
 
 # Register the cleanup function with atexit
 atexit.register(close_visio_app)

@@ -28,7 +28,7 @@ Visio MCP Server allows you to automate Visio diagram creation and editing using
 
 ```bash
 pip install pywin32
-pip install mcp-server
+pip install "mcp[cli]<2"
 ```
 
 3. Clone or download this repository
@@ -52,9 +52,13 @@ The server provides the following functionality:
 - Add text to shapes
 - List all shapes in a document
 
+### Stencils
+- List the Visio stencils installed on the machine (Visio Content, My Shapes)
+- Browse the shapes in a stencil (e.g. SERVER_U: web, database, file servers)
+- Add stencil shapes to a diagram, with optional label and size
+
 ### File Operations
 - Save documents to specified locations
-- Export diagrams as images
 - Close documents safely
 
 ## MCP Configuration
@@ -166,6 +170,41 @@ Lists all shapes in a Visio diagram.
 }
 ```
 
+### List Stencils
+Lists the stencils available on this machine.
+
+```json
+{
+  "query": "Optional text to filter by file name, e.g. server"
+}
+```
+
+### List Stencil Masters
+Lists the shapes (masters) in a stencil.
+
+```json
+{
+  "stencil": "Stencil name (e.g. SERVER_U) or full path to a .vssx/.vss file"
+}
+```
+
+### Add Stencil Shape
+Adds a shape from a stencil to a Visio diagram. Position is the shape's centre, in inches.
+The returned shape ID can be used with Connect Shapes and Add Text.
+
+```json
+{
+  "file_path": "Path to the Visio file",
+  "stencil": "SERVER_U",
+  "master": "Database server",
+  "x": 4.0,
+  "y": 5.0,
+  "text": "Optional label",
+  "width": 1.2,
+  "height": 1.2
+}
+```
+
 ## Usage Example
 
 Here's a complete workflow example:
@@ -254,7 +293,6 @@ The following features are planned for future releases:
 - Import from CSV/JSON data sources
 
 ### Custom Stencil Support
-- Loading custom stencils
 - Creating and saving custom stencils
 - Searching stencil shapes
 
