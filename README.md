@@ -48,6 +48,7 @@ The server provides the following functionality:
 
 ### Shape Management
 - Add various shapes (Rectangle, Circle, Line, etc.)
+- Style shapes and connectors: colors, line weight and pattern, arrowheads, labels, fonts
 - Connect shapes with different connector types
 - Add text to shapes
 - List all shapes in a document
@@ -134,9 +135,21 @@ Adds a shape to a Visio diagram.
   "x": 1.0,
   "y": 1.0,
   "width": 1.0,
-  "height": 1.0
+  "height": 1.0,
+  "text": "Optional label (default: the shape type)",
+  "fill_color": "Optional, #RRGGBB or a name such as red, blue, teal",
+  "line_color": "Optional outline color",
+  "line_weight": 1.5,
+  "line_pattern": "solid, dash, dot or dashdot",
+  "text_color": "Optional label color",
+  "font_size": 12,
+  "bold": true,
+  "rounding": 0.1
 }
 ```
+
+All style fields are optional; omitted ones keep Visio's defaults. `line_weight` and
+`font_size` are in points, `rounding` (corner radius) is in inches.
 
 ### Connect Shapes
 Connects two shapes in a Visio diagram.
@@ -146,9 +159,20 @@ Connects two shapes in a Visio diagram.
   "file_path": "Path to the Visio file",
   "shape1_id": 1,
   "shape2_id": 2,
-  "connector_type": "Dynamic, Straight, or Curved"
+  "connector_type": "Dynamic, Straight, or Curved",
+  "line_color": "Optional, #RRGGBB or a name such as red, blue, teal",
+  "line_weight": 2,
+  "line_pattern": "solid, dash, dot or dashdot",
+  "begin_arrow": false,
+  "end_arrow": true,
+  "label": "Optional text shown on the connector",
+  "text_color": "Optional label color",
+  "font_size": 10
 }
 ```
+
+All style fields are optional. Straight and Curved connectors are routed centre to centre
+so they are not re-routed at right angles.
 
 ### Add Text
 Adds text to a shape in a Visio diagram.

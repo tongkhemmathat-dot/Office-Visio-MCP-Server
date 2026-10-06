@@ -108,6 +108,56 @@ def get_page(doc):
     """Return the first page of doc, independent of which window is active."""
     return doc.Pages.Item(1)
 
+NAMED_COLORS = {
+    "black": "000000", "white": "FFFFFF", "red": "DC2626", "green": "16A34A",
+    "blue": "2563EB", "yellow": "FACC15", "orange": "EA580C", "purple": "7C3AED",
+    "teal": "0D9488", "gray": "6B7280", "grey": "6B7280",
+}
+LINE_PATTERNS = {"solid": 1, "dash": 2, "dashed": 2, "dot": 3, "dotted": 3, "dashdot": 4}
+
+def color_formula(color: str) -> str:
+    """Convert '#RRGGBB', 'RRGGBB' or a basic color name to a Visio RGB() formula."""
+    value = NAMED_COLORS.get(color.strip().lower(), color.strip()).lstrip("#")
+    if len(value) != 6 or any(c not in "0123456789abcdefABCDEF" for c in value):
+        raise ValueError(f"Invalid color '{color}'. Use #RRGGBB or a name like red, blue, teal.")
+    r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    return f"RGB({r},{g},{b})"
+
+def line_pattern_value(pattern: str) -> str:
+    key = pattern.strip().lower()
+    if key not in LINE_PATTERNS:
+        raise ValueError(f"Invalid line_pattern '{pattern}'. Use one of: {', '.join(sorted(LINE_PATTERNS))}.")
+    return str(LINE_PATTERNS[key])
+
+def validate_style(fill_color=None, line_color=None, line_pattern=None, text_color=None):
+    """Raise ValueError for bad style input before anything is drawn."""
+    for c in (fill_color, line_color, text_color):
+        if c is not None:
+            color_formula(c)
+    if line_pattern is not None:
+        line_pattern_value(line_pattern)
+
+def apply_shape_style(shape, fill_color=None, line_color=None, line_weight=None, line_pattern=None,
+                      text_color=None, font_size=None, bold=None, rounding=None):
+    """Apply the given style options to a shape; options left as None are not touched."""
+    if fill_color is not None:
+        shape.Cells("FillForegnd").FormulaU = color_formula(fill_color)
+        shape.Cells("FillPattern").FormulaU = "1"
+    if line_color is not None:
+        shape.Cells("LineColor").FormulaU = color_formula(line_color)
+    if line_weight is not None:
+        shape.Cells("LineWeight").FormulaU = f"{line_weight} pt"
+    if line_pattern is not None:
+        shape.Cells("LinePattern").FormulaU = line_pattern_value(line_pattern)
+    if text_color is not None:
+        shape.Cells("Char.Color").FormulaU = color_formula(text_color)
+    if font_size is not None:
+        shape.Cells("Char.Size").FormulaU = f"{font_size} pt"
+    if bold is not None:
+        shape.Cells("Char.Style").FormulaU = "1" if bold else "0"
+    if rounding is not None:
+        shape.Cells("Rounding").FormulaU = f"{rounding} in"
+
 def close_visio_app():
     """Properly close the Visio Application."""
     global visio_app, open_documents
@@ -208,7 +258,12 @@ async def open_visio_file(file_path: str) -> str:
 
 @mcp.tool()
 async def add_shape(file_path: str, shape_type: str, x: float, y: float,
-                    width: Optional[float] = 1.0, height: Optional[float] = 1.0) -> str:
+                    width: Optional[float] = 1.0, height: Optional[float] = 1.0,
+                    text: Optional[str] = None,
+                    fill_color: Optional[str] = None, line_color: Optional[str] = None,
+                    line_weight: Optional[float] = None, line_pattern: Optional[str] = None,
+                    text_color: Optional[str] = None, font_size: Optional[float] = None,
+                    bold: Optional[bool] = None, rounding: Optional[float] = None) -> str:
     """Add a shape to an existing Visio document.
 
     Args:
@@ -218,11 +273,22 @@ async def add_shape(file_path: str, shape_type: str, x: float, y: float,
         y: Y-coordinate for the shape.
         width: Width of the shape (default: 1.0).
         height: Height of the shape (default: 1.0).
+        text: Label for the shape (default: the shape type).
+        fill_color: Fill color as #RRGGBB or a name (red, blue, teal, ...).
+        line_color: Outline color, same formats as fill_color.
+        line_weight: Outline thickness in points.
+        line_pattern: Outline style: solid, dash, dot or dashdot.
+        text_color: Label color, same formats as fill_color.
+        font_size: Label font size in points.
+        bold: Whether the label is bold.
+        rounding: Corner radius in inches (rectangles).
 
     Returns:
         Result message indicating success or failure.
     """
     try:
+        validate_style(fill_color, line_color, line_pattern, text_color)
+
         # If file doesn't exist, try to create it
         if not os.path.exists(resolve_path(file_path)):
             creation_result = await create_visio_file(save_path=file_path)
@@ -246,9 +312,11 @@ async def add_shape(file_path: str, shape_type: str, x: float, y: float,
             # Default to rectangle if shape type not recognized
             shape = page.DrawRectangle(x, y, x + width, y + height)
 
-        # Set shape text
+        # Set shape text and style
         if shape:
-            shape.Text = shape_type
+            shape.Text = text if text is not None else shape_type
+            apply_shape_style(shape, fill_color, line_color, line_weight, line_pattern,
+                              text_color, font_size, bold, rounding)
 
         # Save document
         doc.Save()
@@ -259,7 +327,12 @@ async def add_shape(file_path: str, shape_type: str, x: float, y: float,
 
 @mcp.tool()
 async def connect_shapes(file_path: str, shape1_id: int, shape2_id: int,
-                        connector_type: Optional[str] = "Dynamic") -> str:
+                        connector_type: Optional[str] = "Dynamic",
+                        line_color: Optional[str] = None, line_weight: Optional[float] = None,
+                        line_pattern: Optional[str] = None,
+                        begin_arrow: Optional[bool] = None, end_arrow: Optional[bool] = None,
+                        label: Optional[str] = None,
+                        text_color: Optional[str] = None, font_size: Optional[float] = None) -> str:
     """Connect two shapes in a Visio document.
 
     Args:
@@ -267,11 +340,20 @@ async def connect_shapes(file_path: str, shape1_id: int, shape2_id: int,
         shape1_id: ID of the first shape.
         shape2_id: ID of the second shape.
         connector_type: Type of connector (options: "Dynamic", "Straight", "Curved").
+        line_color: Line color as #RRGGBB or a name (red, blue, teal, ...).
+        line_weight: Line thickness in points.
+        line_pattern: Line style: solid, dash, dot or dashdot.
+        begin_arrow: Draw an arrowhead at the first shape.
+        end_arrow: Draw an arrowhead at the second shape.
+        label: Text shown on the connector.
+        text_color: Label color, same formats as line_color.
+        font_size: Label font size in points.
 
     Returns:
         Result message indicating success or failure.
     """
     try:
+        validate_style(None, line_color, line_pattern, text_color)
         app = get_visio_app()
         doc = get_document(file_path)
         page = get_page(doc)
@@ -285,16 +367,29 @@ async def connect_shapes(file_path: str, shape1_id: int, shape2_id: int,
 
         connector = page.Drop(app.ConnectorToolDataObject, 0, 0)
 
-        # ConLineRouteExt: 0 = default, 1 = straight, 2 = curved
+        # ShapeRouteStyle 16 = centre to centre, so straight/curved lines are not
+        # re-routed at right angles. ConLineRouteExt: 0 = default, 1 = straight, 2 = curved
         connector_type_lower = connector_type.lower()
         if connector_type_lower == "straight":
+            connector.Cells("ShapeRouteStyle").FormulaU = "16"
             connector.Cells("ConLineRouteExt").FormulaU = "1"
         elif connector_type_lower == "curved":
+            connector.Cells("ShapeRouteStyle").FormulaU = "16"
             connector.Cells("ConLineRouteExt").FormulaU = "2"
 
         # Connect shapes
         connector.Cells("BeginX").GlueTo(shape1.Cells("PinX"))
         connector.Cells("EndX").GlueTo(shape2.Cells("PinX"))
+
+        # Style
+        apply_shape_style(connector, line_color=line_color, line_weight=line_weight,
+                          line_pattern=line_pattern, text_color=text_color, font_size=font_size)
+        if begin_arrow is not None:
+            connector.Cells("BeginArrow").FormulaU = "4" if begin_arrow else "0"
+        if end_arrow is not None:
+            connector.Cells("EndArrow").FormulaU = "4" if end_arrow else "0"
+        if label is not None:
+            connector.Text = label
 
         # Save document
         doc.Save()
