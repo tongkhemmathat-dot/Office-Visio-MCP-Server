@@ -1,0 +1,27 @@
+{
+  "title": "Three-tier Web Application",
+  "subtitle": "Left to right: users, load balancer, web, application and database tiers",
+  "direction": "left-right",
+  "nodes": [
+    {"id": "users", "label": "Users", "tier": 0, "fill_color": "#E2E8F0"},
+    {"id": "lb", "label": "Load Balancer", "tier": 1, "fill_color": "#FEF3C7"},
+    {"id": "web1", "label": "Web 1", "tier": 2, "stencil": "SERVER_U", "master": "Web server"},
+    {"id": "web2", "label": "Web 2", "tier": 2, "stencil": "SERVER_U", "master": "Web server"},
+    {"id": "app1", "label": "App 1", "tier": 3, "stencil": "SERVER_U", "master": "Application server"},
+    {"id": "app2", "label": "App 2", "tier": 3, "stencil": "SERVER_U", "master": "Application server"},
+    {"id": "db", "label": "Database", "tier": 4, "stencil": "SERVER_U", "master": "Database server"}
+  ],
+  "links": [
+    {"from": "users", "to": "lb", "arrow": "end", "label": "HTTPS"},
+    {"from": "lb", "to": "web1", "arrow": "end"},
+    {"from": "lb", "to": "web2", "arrow": "end"},
+    {"from": "web1", "to": "app1", "arrow": "end"},
+    {"from": "web2", "to": "app2", "arrow": "end"},
+    {"from": "app1", "to": "db", "arrow": "end"},
+    {"from": "app2", "to": "db", "arrow": "end"}
+  ],
+  "groups": [
+    {"label": "Web tier", "nodes": ["web1", "web2"], "color": "#16A34A"},
+    {"label": "App tier", "nodes": ["app1", "app2"], "color": "#7C3AED"}
+  ]
+}

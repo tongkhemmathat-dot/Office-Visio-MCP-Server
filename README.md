@@ -38,6 +38,9 @@ pip install "mcp[cli]<2"
 python visio_mcp_server.py
 ```
 
+> **Using this with a team?** See the [team guide](docs/TEAM_GUIDE.md) (Thai) for setup, stencils,
+> prompts, rack diagrams and troubleshooting, and [`examples/`](examples) for ready-made specs.
+
 ## Features
 
 The server provides the following functionality:
@@ -52,6 +55,14 @@ The server provides the following functionality:
 - Connect shapes with different connector types
 - Add text to shapes
 - List all shapes in a document
+
+### System Engineering
+- Draw a complete network/system diagram from one JSON spec (`build_diagram`): automatic tiered layout,
+  stencil icons, labelled links and grouping boxes
+- Rack diagrams: add a rack, mount devices by U position with overlap/range checks, list free units
+  (`add_rack`, `add_rack_device`, `list_rack`)
+- Search shapes inside stencils (`search_stencil_shapes`), delete shapes (`delete_shape`)
+- Export to PNG, JPG, GIF, BMP, SVG or PDF (`export_diagram`)
 
 ### Stencils
 - List the Visio stencils installed on the machine (Visio Content, My Shapes)

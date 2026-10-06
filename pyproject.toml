@@ -28,6 +28,8 @@ test = ["pytest>=7"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Visio's COM layer raises benign SEH exceptions that faulthandler would print as "fatal"
+addopts = "-p no:faulthandler"
 
 [project.urls]
 "Homepage" = "https://github.com/GongRzhe/Office-Visio-MCP-Server"

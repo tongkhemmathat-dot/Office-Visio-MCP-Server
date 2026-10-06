@@ -1,0 +1,34 @@
+{
+  "title": "Sangfor HCI - Network Overview",
+  "subtitle": "3-node cluster, redundant core switches, dedicated aSAN storage switch",
+  "direction": "top-down",
+  "icon_size": 1.0,
+  "nodes": [
+    {"id": "internet", "label": "Internet", "tier": 0, "stencil": "NETLOC_U", "master": "Cloud", "icon_size": 1.6},
+    {"id": "fw", "label": "Firewall", "tier": 1, "stencil": "PERIPH_U", "master": "Firewall"},
+    {"id": "core1", "label": "Core Switch 1", "tier": 2, "stencil": "PERIPH_U", "master": "Switch"},
+    {"id": "core2", "label": "Core Switch 2", "tier": 2, "stencil": "PERIPH_U", "master": "Switch"},
+    {"id": "node1", "label": "HCI Node 1", "tier": 3, "stencil": "SERVER_U", "master": "Server"},
+    {"id": "node2", "label": "HCI Node 2", "tier": 3, "stencil": "SERVER_U", "master": "Server"},
+    {"id": "node3", "label": "HCI Node 3", "tier": 3, "stencil": "SERVER_U", "master": "Server"},
+    {"id": "san", "label": "Storage Switch (aSAN 10GbE)", "tier": 4, "stencil": "PERIPH_U", "master": "Switch"}
+  ],
+  "links": [
+    {"from": "internet", "to": "fw"},
+    {"from": "fw", "to": "core1"},
+    {"from": "fw", "to": "core2"},
+    {"from": "core1", "to": "core2", "label": "LAG", "color": "#0D9488"},
+    {"from": "core1", "to": "node1"},
+    {"from": "core1", "to": "node2"},
+    {"from": "core1", "to": "node3"},
+    {"from": "core2", "to": "node1"},
+    {"from": "core2", "to": "node2"},
+    {"from": "core2", "to": "node3"},
+    {"from": "node1", "to": "san", "pattern": "dash", "color": "#0D9488"},
+    {"from": "node2", "to": "san", "pattern": "dash", "color": "#0D9488"},
+    {"from": "node3", "to": "san", "pattern": "dash", "color": "#0D9488"}
+  ],
+  "groups": [
+    {"label": "Sangfor HCI cluster", "nodes": ["node1", "node2", "node3"], "color": "#2563EB"}
+  ]
+}
