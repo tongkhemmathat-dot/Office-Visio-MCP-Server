@@ -110,3 +110,39 @@ def test_stencil_search():
     found = json.loads(run(server.search_stencil_shapes("DL380 Gen10", "HPE-ProLiant-DL")))
     assert found and all("DL380 Gen10" in m["master"] for m in found)
     assert run(server.search_stencil_shapes("x", "no-such-stencil")).startswith("Error searching stencil shapes")
+
+
+def test_connectors_to_one_d_shapes_and_images_do_not_shift_the_page(diagram):
+    """Rack-equipment masters are 1-D (no glue target) and a Synology master is an embedded image.
+
+    Connecting to them must work and must not move existing shapes. Note: the page-origin shift
+    that motivated dropping connectors on their first shape was only seen on a large, dense page
+    (26 x 38 in, ~75 shapes); this small page does not reproduce it, so that part is not guarded here.
+    """
+    a = shape_id(run(server.add_shape(diagram, "Rectangle", 2, 2, 1, 1, text="A")))
+    one_d = shape_id(run(server.add_stencil_shape(diagram, "HPE-ProLiant-DL", "DL380 Gen10 SFF front", 6, 5)))
+    image = shape_id(run(server.add_stencil_shape(diagram, "Synology", "SA3400 Front", 6, 3)))
+
+    page = server.get_page(server.get_document(diagram))
+    before = page.Shapes.ItemFromID(a).Cells("PinX").ResultIU
+    for target in (one_d, image):
+        assert "connected" in run(server.connect_shapes(diagram, a, target, "Straight", label="link"))
+    assert page.Shapes.ItemFromID(a).Cells("PinX").ResultIU == before
+
+
+def test_connector_labels_have_an_opaque_background(diagram):
+    a = shape_id(run(server.add_shape(diagram, "Rectangle", 1, 5)))
+    b = shape_id(run(server.add_shape(diagram, "Rectangle", 6, 5)))
+    run(server.connect_shapes(diagram, a, b, label="HTTPS 443"))
+    page = server.get_page(server.get_document(diagram))
+    connectors = [s for s in page.Shapes if s.OneD and s.Text == "HTTPS 443"]
+    assert connectors and connectors[0].Cells("TextBkgndTrans").FormulaU == "0%"
+
+
+def test_raster_export_failure_points_to_pdf(diagram, tmp_path, monkeypatch):
+    class Broken:
+        def Export(self, path):
+            raise RuntimeError("boom")
+    monkeypatch.setattr(server, "get_page", lambda doc: Broken())
+    result = run(server.export_diagram(diagram, str(tmp_path / "x.png")))
+    assert result.startswith("Error exporting diagram:") and "pdf or .svg" in result

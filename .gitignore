@@ -8,3 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
+# Internal diagrams and generators that contain real hostnames/IPs
+private/

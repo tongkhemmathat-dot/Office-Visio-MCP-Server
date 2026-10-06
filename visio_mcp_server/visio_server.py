@@ -626,6 +626,18 @@ def bbox(shape) -> tuple:
     return left, bottom, right, top
 
 
+def set_formula(cell, formula: str) -> None:
+    """Set a cell formula, forcing it only if the cell is guarded.
+
+    Plain assignment is tried first: for some shapes (e.g. images in stencils) a forced
+    assignment is silently overridden by the master's own formula.
+    """
+    try:
+        cell.FormulaU = formula
+    except Exception:
+        cell.FormulaForceU = formula
+
+
 def move_by_bbox(shape, center_x: Optional[float] = None, bottom_y: Optional[float] = None,
                  center_y: Optional[float] = None) -> None:
     """Shift a shape so its visible bounding box lands on the given centre x / bottom y / centre y.
@@ -641,9 +653,9 @@ def move_by_bbox(shape, center_x: Optional[float] = None, bottom_y: Optional[flo
     else:
         dy = 0.0
     if dx:
-        shape.Cells("PinX").FormulaForceU = f"{shape.Cells('PinX').ResultIU + dx} in"
+        set_formula(shape.Cells("PinX"), f"{shape.Cells('PinX').ResultIU + dx} in")
     if dy:
-        shape.Cells("PinY").FormulaForceU = f"{shape.Cells('PinY').ResultIU + dy} in"
+        set_formula(shape.Cells("PinY"), f"{shape.Cells('PinY').ResultIU + dy} in")
 
 
 def center_on(shape, x: float, y: float) -> None:
@@ -651,8 +663,8 @@ def center_on(shape, x: float, y: float) -> None:
     cells = shape.Cells
     center_x = cells("PinX").ResultIU - cells("LocPinX").ResultIU + cells("Width").ResultIU / 2
     center_y = cells("PinY").ResultIU - cells("LocPinY").ResultIU + cells("Height").ResultIU / 2
-    cells("PinX").FormulaForceU = f"{cells('PinX').ResultIU + x - center_x} in"
-    cells("PinY").FormulaForceU = f"{cells('PinY').ResultIU + y - center_y} in"
+    set_formula(cells("PinX"), f"{cells('PinX').ResultIU + x - center_x} in")
+    set_formula(cells("PinY"), f"{cells('PinY').ResultIU + y - center_y} in")
 
 
 def fit_to_size(shape, size: float) -> None:
@@ -693,13 +705,33 @@ def get_user_cell(shape, name: str, number: bool = False):
     return cell.ResultIU if number else cell.ResultStr("")
 
 
+def connectable(page, shape):
+    """Return a shape a connector can glue to.
+
+    Rack-equipment masters are 1-D shapes, which connectors cannot glue to ("Inappropriate target
+    object"). For those, an invisible 2-D anchor is drawn at the shape's centre and returned instead.
+    """
+    if not shape.OneD:
+        return shape
+    cells = shape.Cells
+    x = cells("PinX").ResultIU - cells("LocPinX").ResultIU + cells("Width").ResultIU / 2
+    y = cells("PinY").ResultIU - cells("LocPinY").ResultIU + cells("Height").ResultIU / 2
+    anchor = page.DrawRectangle(x - 0.02, y - 0.02, x + 0.02, y + 0.02)
+    anchor.Cells("FillPattern").FormulaForceU = "0"
+    anchor.Cells("LinePattern").FormulaForceU = "0"
+    return anchor
+
+
 def make_connector(app, page, shape1, shape2, connector_type: str = "Dynamic", line_color=None,
                    line_weight=None, line_pattern=None, begin_arrow=None, end_arrow=None, label=None,
                    text_color=None, font_size=None):
     """Draw a connector glued between two shapes and style it."""
     route = {"dynamic": None, "straight": LINE_ROUTE_STRAIGHT, "curved": LINE_ROUTE_CURVED}.get(
         connector_type.lower())
-    connector = page.Drop(app.ConnectorToolDataObject, 0, 0)
+    shape1, shape2 = connectable(page, shape1), connectable(page, shape2)
+    # Drop on the first shape rather than at the page corner (a zero-size shape on the corner can
+    # make Visio shift the page origin on pages that hold embedded images)
+    connector = page.Drop(app.ConnectorToolDataObject, shape1.Cells("PinX").ResultIU, shape1.Cells("PinY").ResultIU)
     if route is not None:
         # Centre-to-centre routing keeps straight/curved lines from being re-routed at right angles
         connector.Cells("ShapeRouteStyle").FormulaU = str(ROUTE_CENTER_TO_CENTER)
@@ -715,14 +747,23 @@ def make_connector(app, page, shape1, shape2, connector_type: str = "Dynamic", l
         connector.Cells("EndArrow").FormulaU = str(ARROW_TRIANGLE if end_arrow else ARROW_NONE)
     if label is not None:
         connector.Text = label
+        # Opaque text background (uses the theme's white). Setting TextBkgnd to an RGB value
+        # renders grey, so only the transparency is changed.
+        connector.Cells("TextBkgndTrans").FormulaForceU = "0%"
     return connector
 
 
 def drop_stencil_shape(page, stencil: str, master: str):
-    """Drop a stencil master on the page at the origin and return the shape and its master."""
+    """Drop a stencil master near the page centre and return the shape and its master.
+
+    The caller moves it to its final position. Dropping at the page corner is avoided because
+    for some masters (images) a shape hanging off the page makes Visio shift the page origin.
+    """
     stencil_doc = get_stencil(stencil)
     master_obj = find_master(stencil_doc, master)
-    return page.Drop(master_obj, 0, 0), master_obj, stencil_doc
+    factor = drawing_factor(page)
+    width, height = page_size(page)
+    return page.Drop(master_obj, width * factor / 2, height * factor / 2), master_obj, stencil_doc
 
 
 # --- Tools: whole diagrams ---------------------------------------------------
@@ -1019,7 +1060,11 @@ async def export_diagram(file_path: str, output_path: str) -> str:
     if extension == ".pdf":
         doc.ExportAsFixedFormat(VIS_FIXED_FORMAT_PDF, out, VIS_DOC_EX_INTENT_PRINT, VIS_PRINT_ALL)
     else:
-        get_page(doc).Export(out)
+        try:
+            get_page(doc).Export(out)
+        except Exception as e:
+            raise ToolError(f"Visio could not render this page as {extension} ({e}). Very large pages with many "
+                            "images can fail as bitmaps: export .pdf or .svg instead.")
     return f"Exported to: {out}"
 
 

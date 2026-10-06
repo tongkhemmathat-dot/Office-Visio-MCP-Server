@@ -42,7 +42,9 @@ python -m venv .venv
 
 ถ้าเครื่องไม่มี Visio ชุดทดสอบส่วนที่ต้องใช้ Visio จะถูกข้ามโดยอัตโนมัติ
 
-## 3. เชื่อมกับ Claude
+## 3. เชื่อมกับ AI client
+
+### 3.1 Claude
 
 **Claude Code** (แทน `<โฟลเดอร์>` ด้วย path ที่ clone ไว้):
 
@@ -65,7 +67,75 @@ claude mcp add visio_server -- <โฟลเดอร์>\.venv\Scripts\python.e
 
 > ไฟล์ `mcp-config.json` ใน repo เป็นตัวอย่างที่ชี้ path ของเครื่องผู้พัฒนา ต้องแก้ path ก่อนใช้
 
-เริ่ม session ใหม่แล้วถาม Claude ว่า "list the Visio tools" ถ้าเห็น tool 18 ตัวแสดงว่าพร้อมใช้
+เริ่ม session ใหม่แล้วถาม AI ว่า "list the Visio tools" ถ้าเห็น tool 18 ตัวแสดงว่าพร้อมใช้
+
+### 3.2 Client อื่นที่รองรับ MCP
+
+เซิร์ฟเวอร์เป็น MCP แบบ stdio มาตรฐาน ใช้กับ client อื่นได้ทุกตัวที่รันบน **เครื่อง Windows เดียวกับ Visio**
+ทุกตัวต้องบอก 2 อย่างเหมือนกัน คือ `command` = `python.exe` ใน `.venv` และ `args` = path ของ `visio_server.py`
+(ใช้ `<โฟลเดอร์>` แทน path ที่ clone ไว้ ใน JSON ให้เขียน `\\` แทน `\`)
+
+> สถานะการทดสอบ: ทดสอบจริงแล้วกับ **Claude Code** เท่านั้น ส่วน client ด้านล่างตรวจรูปแบบ config
+> กับเอกสารของแต่ละเจ้าแล้ว แต่ยังไม่ได้ลองรันจริง ถ้าติดปัญหาแจ้งทีมผู้ดูแล
+
+| Client | ไฟล์ตั้งค่า | key หลัก |
+|---|---|---|
+| Google Antigravity | `~/.gemini/config/mcp_config.json` (หรือ Agent panel → MCP Servers → Manage → View raw config) | `mcpServers` |
+| Cursor | `~/.cursor/mcp.json` (ทุกโปรเจกต์) หรือ `.cursor/mcp.json` (เฉพาะโปรเจกต์) | `mcpServers` |
+| VS Code (Copilot) | `.vscode/mcp.json` ในโปรเจกต์ | `servers` (ไม่ใช่ `mcpServers`) |
+| Gemini CLI | `~/.gemini/settings.json` หรือ `.gemini/settings.json` | `mcpServers` |
+| OpenAI Codex CLI | `~/.codex/config.toml` | `[mcp_servers.<ชื่อ>]` (TOML) |
+
+**Antigravity, Cursor, Gemini CLI** ใช้รูปแบบเดียวกับ Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "visio_server": {
+      "command": "<โฟลเดอร์>\\.venv\\Scripts\\python.exe",
+      "args": ["<โฟลเดอร์>\\visio_mcp_server\\visio_server.py"]
+    }
+  }
+}
+```
+
+**VS Code** ใช้ `servers` และระบุ `type`:
+
+```json
+{
+  "servers": {
+    "visio_server": {
+      "type": "stdio",
+      "command": "<โฟลเดอร์>\\.venv\\Scripts\\python.exe",
+      "args": ["<โฟลเดอร์>\\visio_mcp_server\\visio_server.py"]
+    }
+  }
+}
+```
+
+**Codex CLI** ใช้คำสั่งหรือแก้ `config.toml` (ใช้เครื่องหมาย `'` เพื่อไม่ต้อง escape `\`):
+
+```powershell
+codex mcp add visio_server -- <โฟลเดอร์>\.venv\Scripts\python.exe <โฟลเดอร์>\visio_mcp_server\visio_server.py
+```
+
+```toml
+[mcp_servers.visio_server]
+command = 'C:\path\to\.venv\Scripts\python.exe'
+args = ['C:\path\to\visio_mcp_server\visio_server.py']
+startup_timeout_sec = 60
+```
+
+ข้อควรระวังเมื่อใช้กับ client อื่น
+- **เซิร์ฟเวอร์เปิด Visio ตอนเริ่ม** ซึ่งอาจใช้เวลาหลายวินาที ถ้า client ตัดการเชื่อมต่อเพราะ timeout ให้ขยาย
+  เวลา (เช่น `startup_timeout_sec` ของ Codex) หรือเปิด Visio ทิ้งไว้ก่อน เซิร์ฟเวอร์จะต่อเข้ากับตัวที่เปิดอยู่ทันที
+- **path ที่มี `\`** ใน JSON ต้องเขียนเป็น `\\` ถ้า client ไม่เห็น tool ให้เช็กจุดนี้ก่อน
+- **Gemini CLI** ถามยืนยันทุกครั้งที่เรียก tool (ค่า `trust` เป็น `false`) ตั้ง `"trust": true` เฉพาะเมื่อมั่นใจ
+  เพราะเซิร์ฟเวอร์นี้เขียนไฟล์ในเครื่องได้
+- บาง client จำกัดจำนวน tool รวมต่อ session (tool นี้มี 18 ตัว) ถ้าเปิดหลายเซิร์ฟเวอร์แล้วเต็ม ให้ปิดตัวที่ไม่ใช้
+- **client ที่ใช้โมเดลอื่น** อาจตีความ schema ของ tool ไม่เหมือน Claude (เช่น `build_diagram` ที่รับ spec แบบ object)
+  ถ้าเรียกแล้ว error เรื่อง schema หรือโมเดลวาง spec ผิด ให้ส่งตัวอย่างจาก `examples/` ให้เป็นแม่แบบ
+- ไม่ต้องมี client ก็สร้างจาก spec ได้: `python examples\build_from_spec.py spec.json out.vsdx`
 
 **ข้อควรรู้เรื่อง Visio ที่เปิดอยู่**
 - ถ้าคุณเปิด Visio ไว้แล้ว เซิร์ฟเวอร์จะต่อเข้ากับตัวนั้นและ **ไม่ปิด Visio ของคุณ** (ปิดเฉพาะเอกสารที่มันเปิดเอง)
@@ -222,7 +292,10 @@ path ที่ตั้งใน Visio ดังนั้นวางไฟล�
 | `... overlaps '...'` / `does not fit` | เลข U ทับหรือเกินตู้ เรียก `list_rack` ดูช่องว่าง |
 | งานล้นหน้ากระดาษ | หน้าตั้งเป็นแนวนอนขนาดกำหนดเองแล้ว ถ้ายังล้น ใช้ `set_page_setup` ขยายหน้า หรือแบ่งหลายไฟล์ |
 | ไอคอนใหญ่/เล็กผิดปกติ | stencil แบบหน่วยจริง: ใช้ `add_rack` (ตั้งสเกลให้) หรือ `build_diagram` (ปรับขนาดไอคอนให้) |
-| ป้ายบนเส้นมีพื้นหลังเทา | ข้อจำกัดที่ทราบ ยังไม่ได้แก้ |
+| ต่อเส้นเข้ากับ shape ของ rack ไม่ได้ (`Inappropriate target object`) | แก้แล้ว: shape ของ rack เป็นเส้น (1-D) เซิร์ฟเวอร์สร้างจุดยึดโปร่งใสให้เองตอนต่อเส้น |
+| shape ทั้งหน้าเลื่อนตำแหน่งหลังต่อเส้น / PDF ขนาดผิดปกติ | แก้แล้ว: เกิดจากการวางเส้นเชื่อมที่มุมหน้ากระดาษ ตอนนี้วางบน shape ต้นทาง |
+| ส่งออก PNG/JPG ไม่ได้บนหน้าใหญ่มาก (`unable to complete exporting`) | ข้อจำกัดของ Visio กับหน้าใหญ่ที่มีรูปจำนวนมาก ส่งออกเป็น `.pdf` หรือ `.svg` แทน (เซิร์ฟเวอร์แจ้งข้อความนี้ให้) |
+| ไอคอน Synology เป็นรูปภาพ ไม่ได้ปรับสีได้ | stencil ของ Synology เป็น bitmap ฝัง `fill_color` ใช้ไม่ได้ผล และไม่มีรุ่น DP7400 ให้ใช้รุ่นใกล้เคียงแล้วระบุในป้าย |
 | `Cell is guarded` | เซิร์ฟเวอร์ข้ามให้เอง ถ้าเห็นใน log แสดงว่า shape นั้นล็อกบางส่วน |
 | Visio ค้าง/ไม่ตอบสนอง | ปิด Visio ทั้งหมดแล้วลองใหม่ ตรวจว่าไม่มีกล่องโต้ตอบเปิดค้างอยู่ |
 
