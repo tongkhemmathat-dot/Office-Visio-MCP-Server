@@ -105,9 +105,14 @@ Creates a new Visio diagram.
 ```json
 {
   "template_path": "[optional] Path to Visio template (.vstx, .vst)",
-  "save_path": "[optional] Where to save the file"
+  "save_path": "[optional] Where to save the file",
+  "page_width": 11.69,
+  "page_height": 8.27
 }
 ```
+
+Blank documents get a custom page size (default A4 landscape, in inches) that Visio does not
+reset to the printer's paper. The page size is ignored when a template is used.
 
 Example:
 ```json
@@ -194,6 +199,22 @@ Lists all shapes in a Visio diagram.
 }
 ```
 
+### Set Page Setup
+Sets the page size, and optionally the drawing scale, of a document's first page.
+
+```json
+{
+  "file_path": "Path to the Visio file",
+  "width": 11.69,
+  "height": 8.27,
+  "drawing_scale": 12
+}
+```
+
+`drawing_scale` is optional: the real inches represented by one page inch (12 means 1:12).
+Stencils from VisioCafe (HPE, Dell, ...) are drawn in real units and work best on a scaled page.
+Coordinates passed to the shape tools are then in real (drawing) inches.
+
 ### List Stencils
 Lists the stencils available on this machine.
 
@@ -225,9 +246,18 @@ The returned shape ID can be used with Connect Shapes and Add Text.
   "y": 5.0,
   "text": "Optional label",
   "width": 1.2,
-  "height": 1.2
+  "height": 1.2,
+  "fill_color": "Optional, #RRGGBB or a name such as red, blue, teal",
+  "line_color": "Optional outline color",
+  "line_weight": 1.5,
+  "line_pattern": "solid, dash, dot or dashdot",
+  "text_color": "Optional label color",
+  "font_size": 12,
+  "bold": true
 }
 ```
+
+Style fields are optional. A fill color replaces the stencil's built-in 3D shading with a flat color.
 
 ## Usage Example
 
@@ -341,6 +371,16 @@ The following features are planned for future releases:
 - Server operation without visible Visio UI
 - Background diagram processing
 - Scheduled operations
+
+## Development
+
+```
+pip install -e ".[test]"
+pytest
+```
+
+The style parsing and validation in `visio_mcp_server/styles.py` is tested without Visio.
+Everything else needs Visio installed.
 
 ## Troubleshooting
 
