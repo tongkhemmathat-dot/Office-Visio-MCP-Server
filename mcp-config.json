@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "visio_server": {
-      "command": "D:\\BackDataService\\Visio-MCP-Server\\.venv\\Scripts\\python.exe",
+      "command": "D:\\Claude_app\\visiomcp\\.venv\\Scripts\\python.exe",
       "args": [
-        "D:\\BackDataService\\Visio-MCP-Server\\visio_server.py"
+        "D:\\Claude_app\\visiomcp\\visio_mcp_server\\visio_server.py"
       ],
       "env": {
-        "PYTHONPATH": "D:\\BackDataService\\Visio-MCP-Server"
+        "PYTHONPATH": "D:\\Claude_app\\visiomcp"
       }
     }
   }
