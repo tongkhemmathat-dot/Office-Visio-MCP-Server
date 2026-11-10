@@ -35,7 +35,13 @@ pip install "mcp[cli]<2"
 4. Run the server:
 
 ```bash
-python visio_mcp_server.py
+python -m visio_mcp_server.visio_server
+```
+
+Or, after `pip install -e .`, use the console script:
+
+```bash
+visio_mcp_server
 ```
 
 > **Using this with a team?** See the [team guide](docs/TEAM_GUIDE.md) (Thai) for setup, stencils,

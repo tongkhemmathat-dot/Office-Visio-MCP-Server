@@ -139,15 +139,12 @@ def generate_mcp_config_local(python_path):
     # Get absolute path of the directory containing the current script
     base_path = os.path.abspath(os.path.dirname(__file__))
     
-    # Path to Visio Server script
-    server_script_path = os.path.join(base_path, 'visio_mcp_server.py')
-    
     # Create MCP configuration dictionary
     config = {
         "mcpServers": {
             "visio-server": {
                 "command": python_path,
-                "args": [server_script_path],
+                "args": ["-m", "visio_mcp_server.visio_server"],
                 "env": {
                     "PYTHONPATH": base_path
                 }
