@@ -172,3 +172,29 @@ def test_svg_to_visio_creates_native_shapes(tmp_path):
         assert os.path.exists(tmp_path / "d.png")
     finally:
         run(server.close_document(out))
+
+
+def test_svg_to_visio_groups_transforms_paths_and_opacity(tmp_path):
+    svg = tmp_path / "g.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="288">'
+        '<g transform="translate(96,96)" opacity="0.5">'
+        '<rect width="96" height="48" rx="10" fill="#FF0000"/>'
+        '<circle cx="144" cy="24" r="24" fill="#0000FF"/></g>'
+        '<path d="M 0 288 L 96 192 L 192 288 Z" fill="#00FF00" stroke="#000000" stroke-width="2"/>'
+        '<text x="400" y="200" font-size="13" transform="rotate(-90 400 200)">Rot</text></svg>',
+        encoding="utf8")
+    out = str(tmp_path / "g.vsdx")
+    result = run(server.svg_to_visio(str(svg), out))
+    try:
+        assert "1 rect, 1 ellipse, 1 polyline, 1 text" in result
+        page = server.get_page(server.get_document(out))
+        shapes = list(page.Shapes)
+        rect = next(s for s in shapes if abs(s.CellsU("Rounding").ResultIU - 10 / 96) < 1e-6)
+        # translate(96,96) -> x 1..2 in, y 96..144 of 288 -> Visio y 1.0..1.5? (3 - 1.5 .. 3 - 1)
+        assert abs(rect.CellsU("PinX").ResultIU - 1.5) < 1e-6 and abs(rect.CellsU("PinY").ResultIU - 1.75) < 1e-6
+        assert abs(rect.CellsU("FillForegndTrans").ResultIU - 0.5) < 1e-6
+        text = next(s for s in shapes if s.Text == "Rot")
+        assert abs(text.CellsU("Angle").ResultIU - 3.141592653589793 / 2) < 1e-6   # -90 deg clockwise
+    finally:
+        run(server.close_document(out))

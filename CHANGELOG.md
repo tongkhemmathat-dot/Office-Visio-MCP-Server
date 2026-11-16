@@ -6,7 +6,10 @@
 - `svg_to_visio`: convert an SVG into a new `.vsdx` with one native Visio shape per element (rect, polyline
   with end arrow, text/tspan, image). Icons are inserted as PNG pictures; SVG icons are rasterised with
   headless Edge. Unsupported elements are listed in the result; `export_png` renders the result for comparison.
-- `svg_import.py`: Visio-free SVG parser with unit tests.
+- `svg_import.py`: Visio-free SVG parser with unit tests. Resolves `<g>`/`<use>`/`<symbol>`, nested
+  transforms and viewBox, rect (rx), circle, ellipse, line, polygon, path (curves/arcs flattened), CSS
+  (`<style>` rules, `style` attribute, inheritance), opacity, gradients (average colour), start/end arrows,
+  rotated text and `font-size` units. Unsupported features (filter, mask, clip-path, foreignObject) are reported.
 
 ## 1.1.0 - 2026-10-06
 

@@ -8,6 +8,7 @@ It drives Microsoft Visio through its COM automation API using pywin32.
 import atexit
 import functools
 import json
+import math
 import os
 import shutil
 import sys
@@ -1076,6 +1077,7 @@ async def export_diagram(file_path: str, output_path: str) -> str:
 
 SVG_PX = 1 / 96.0           # one SVG user unit in inches (CSS pixel)
 ARROW_FILLED_TRIANGLE = 13
+LINE_PATTERNS = {"dash": "2", "dot": "3"}
 
 
 def svg_rgb(color: str) -> str:
@@ -1092,14 +1094,26 @@ def svg_font_id(doc, family: str) -> int:
     return doc.Fonts.Item(1).ID
 
 
-def svg_style_line(shape, stroke, width: float, dashed: bool) -> None:
+def svg_style_fill(shape, fill, opacity: float = 1.0) -> None:
+    if not fill:
+        shape.CellsU("FillPattern").FormulaU = "0"
+        return
+    shape.CellsU("FillPattern").FormulaU = "1"
+    shape.CellsU("FillForegnd").FormulaU = svg_rgb(fill)
+    if opacity < 1:
+        shape.CellsU("FillForegndTrans").FormulaU = "%d%%" % round((1 - opacity) * 100)
+
+
+def svg_style_line(shape, stroke, width: float, dash, opacity: float = 1.0) -> None:
     if not stroke:
         shape.CellsU("LinePattern").FormulaU = "0"
         return
     shape.CellsU("LineColor").FormulaU = svg_rgb(stroke)
     shape.CellsU("LineWeight").ResultIU = width * SVG_PX
-    if dashed:
-        shape.CellsU("LinePattern").FormulaU = "2"
+    if dash:
+        shape.CellsU("LinePattern").FormulaU = LINE_PATTERNS[dash]
+    if opacity < 1:
+        shape.CellsU("LineColorTrans").FormulaU = "%d%%" % round((1 - opacity) * 100)
 
 
 def svg_draw_text(page, item, doc_height: float, font_id: int) -> None:
@@ -1127,9 +1141,21 @@ def svg_draw_text(page, item, doc_height: float, font_id: int) -> None:
         shape.CellsU(cell).FormulaU = str(font_id)
     shape.CellsU("Char.Color").FormulaU = svg_rgb(item.fill)
     shape.CellsU("Char.Style").FormulaU = "1" if item.bold else "0"
+    if item.opacity < 1:
+        shape.CellsU("Char.ColorTrans").FormulaU = "%d%%" % round((1 - item.opacity) * 100)
     if len(item.lines) > 1:
         shape.CellsU("Para.SpLine").FormulaU = "%g" % -(item.line_height / (fs * 1.2))
     shape.CellsU("TxtWidth").ResultIU = width * SVG_PX
+    if abs(item.rotation) > 0.01:
+        # SVG rotates clockwise about the anchor point (y down); Visio rotates counter-clockwise
+        # about the shape's centre, so move the centre to where the rotation carries it.
+        theta = math.radians(item.rotation)
+        cx, cy = left + width / 2 - item.x, top + height / 2 - item.y
+        px = item.x + cx * math.cos(theta) - cy * math.sin(theta)
+        py = item.y + cx * math.sin(theta) + cy * math.cos(theta)
+        shape.CellsU("PinX").ResultIU = px * SVG_PX
+        shape.CellsU("PinY").ResultIU = (doc_height - py) * SVG_PX
+        shape.CellsU("Angle").ResultIU = -theta
 
 
 @tool("importing SVG")
@@ -1137,9 +1163,13 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
     """Convert an SVG diagram into a new, editable Visio file (one native Visio shape per SVG element).
 
     The page gets the SVG's size (1 SVG px = 1/96 in) and every element keeps its position, colours,
-    line style, text and z-order. Embedded icons (PNG or SVG data URIs, or image files next to the SVG)
-    are inserted as pictures; SVG icons are rasterised first, which needs Microsoft Edge.
-    Supported elements: rect, polyline (with end arrow), text/tspan, image. Others are skipped and listed.
+    opacity, line style, text and z-order. Embedded icons (PNG or SVG data URIs, or image files next
+    to the SVG) are inserted as pictures; SVG icons are rasterised first, which needs Microsoft Edge.
+
+    Supported: g, use/symbol, transforms, rect (incl. rounded), circle, ellipse, line, polyline, polygon,
+    path (curves are flattened to line segments), text/tspan, image, <style> rules, gradients (as their
+    average colour). Not supported: filters, masks, clip-paths, patterns; they are listed in the result.
+    A path with several subpaths becomes several shapes, so holes are not cut out.
 
     Args:
         svg_path: Path to the SVG file.
@@ -1161,30 +1191,40 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
         page.PageSheet.Cells(cell).ResultIU = 0
     font_id = svg_font_id(doc, svg.font_family)
 
-    counts = {"rect": 0, "polyline": 0, "text": 0, "image": 0}
+    def px(x: float) -> float:
+        return x * SVG_PX
+
+    def py(y: float) -> float:
+        return (svg.height - y) * SVG_PX
+
+    counts = {"rect": 0, "ellipse": 0, "polyline": 0, "text": 0, "image": 0}
     work_dir = tempfile.mkdtemp(prefix="svg_import_")
     try:
         for i, item in enumerate(svg.items):
             if isinstance(item, svg_import.Rect):
-                shape = page.DrawRectangle(item.x * SVG_PX, (svg.height - item.y - item.height) * SVG_PX,
-                                           (item.x + item.width) * SVG_PX, (svg.height - item.y) * SVG_PX)
-                if item.fill:
-                    shape.CellsU("FillPattern").FormulaU = "1"
-                    shape.CellsU("FillForegnd").FormulaU = svg_rgb(item.fill)
-                else:
-                    shape.CellsU("FillPattern").FormulaU = "0"
-                svg_style_line(shape, item.stroke, item.stroke_width, item.dashed)
+                shape = page.DrawRectangle(px(item.x), py(item.y + item.height), px(item.x + item.width), py(item.y))
+                svg_style_fill(shape, item.fill, item.fill_opacity)
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
+                if item.radius > 0:
+                    shape.CellsU("Rounding").ResultIU = min(item.radius, item.width / 2, item.height / 2) * SVG_PX
                 counts["rect"] += 1
+            elif isinstance(item, svg_import.Ellipse):
+                shape = page.DrawOval(px(item.cx - item.rx), py(item.cy + item.ry),
+                                      px(item.cx + item.rx), py(item.cy - item.ry))
+                svg_style_fill(shape, item.fill, item.fill_opacity)
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
+                counts["ellipse"] += 1
             elif isinstance(item, svg_import.Polyline):
                 coords = []
                 for x, y in item.points:
-                    coords += [x * SVG_PX, (svg.height - y) * SVG_PX]
+                    coords += [px(x), py(y)]
                 shape = page.DrawPolyline(tuple(coords), 0)
-                shape.CellsU("FillPattern").FormulaU = "0"
-                svg_style_line(shape, item.stroke, item.stroke_width, item.dashed)
-                if item.arrow_end:
-                    shape.CellsU("EndArrow").FormulaU = str(ARROW_FILLED_TRIANGLE)
-                    shape.CellsU("EndArrowSize").FormulaU = "1"
+                svg_style_fill(shape, item.fill if item.closed else None, item.fill_opacity)
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
+                for flag, cell in ((item.arrow_end, "EndArrow"), (item.arrow_start, "BeginArrow")):
+                    if flag:
+                        shape.CellsU(cell).FormulaU = str(ARROW_FILLED_TRIANGLE)
+                        shape.CellsU(cell + "Size").FormulaU = "1"
                 counts["polyline"] += 1
             elif isinstance(item, svg_import.Text):
                 svg_draw_text(page, item, svg.height, font_id)
@@ -1192,10 +1232,12 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
             elif isinstance(item, svg_import.Image):
                 picture = page.Import(svg_import.image_to_png(item.href, svg.base_dir, work_dir, f"img{i}"))
                 picture.CellsU("LockAspect").FormulaU = "0"
-                picture.CellsU("Width").ResultIU = item.width * SVG_PX
-                picture.CellsU("Height").ResultIU = item.height * SVG_PX
-                picture.CellsU("PinX").ResultIU = (item.x + item.width / 2) * SVG_PX
-                picture.CellsU("PinY").ResultIU = (svg.height - item.y - item.height / 2) * SVG_PX
+                picture.CellsU("Width").ResultIU = px(item.width)
+                picture.CellsU("Height").ResultIU = px(item.height)
+                picture.CellsU("PinX").ResultIU = px(item.x + item.width / 2)
+                picture.CellsU("PinY").ResultIU = py(item.y + item.height / 2)
+                if item.opacity < 1:
+                    picture.CellsU("FillForegndTrans").FormulaU = "%d%%" % round((1 - item.opacity) * 100)
                 counts["image"] += 1
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -1204,8 +1246,7 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
     summary = ", ".join(f"{n} {kind}" for kind, n in counts.items() if n)
     result = f"Created {out} ({page_w:.2f} x {page_h:.2f} in): {summary}."
     if svg.skipped:
-        skipped = sorted(set(svg.skipped))
-        result += f" Skipped {len(svg.skipped)} unsupported element(s): {', '.join(skipped)}."
+        result += f" Skipped or approximated {len(svg.skipped)} thing(s): {', '.join(sorted(set(svg.skipped)))}."
     if export_png:
         result += " " + await export_diagram(out, export_png)
     return result
