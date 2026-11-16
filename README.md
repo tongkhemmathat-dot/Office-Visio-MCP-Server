@@ -1,5 +1,7 @@
 # Visio MCP Server
 
+**English** | [ไทย](README.th.md)
+
 An MCP server that lets an AI assistant (or any MCP client) create and edit Microsoft Visio diagrams
 through Visio's COM automation interface: add shapes, connect them, use stencils, build a whole
 network diagram from one JSON spec, mount devices in racks, export to PNG/PDF/SVG, and turn an SVG
