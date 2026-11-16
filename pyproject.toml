@@ -20,6 +20,8 @@ requires-python = ">=3.8"
 dependencies = [
     "pywin32>=305",
     "mcp[cli]>=1.2.0,<2",
+    "Pillow>=9",
+    "resvg-py>=0.2",
 ]
 
 [project.optional-dependencies]

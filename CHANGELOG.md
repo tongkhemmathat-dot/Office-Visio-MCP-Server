@@ -20,6 +20,8 @@
   and `<switch>` follows SVG conditional processing so draw.io's "Text is not SVG" notice is not drawn.
 - `svg_to_visio`: arrowhead size and style follow the SVG `<marker>` (length from `markerWidth`/`markerUnits`,
   open vs solid head) instead of one fixed size.
+- `svg_to_visio`: embedded SVG icons are rasterised with `resvg-py` (no browser, keeps gradients and aspect ratio);
+  headless Edge is only a fallback. `Pillow` and `resvg-py` are now dependencies.
 
 ## 1.1.0 - 2026-10-06
 

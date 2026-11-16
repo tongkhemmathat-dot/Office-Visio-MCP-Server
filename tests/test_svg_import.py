@@ -367,3 +367,29 @@ def test_marker_without_fill_is_open(tmp_path):
 def test_missing_marker_has_unknown_size(tmp_path):
     p = svg_of(tmp_path, '<polyline points="0,0 9,0" stroke="#000" fill="none" marker-end="url(#zzz)"/>').items[0]
     assert p.arrow_end and p.arrow_size == 0
+
+
+ICON_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40" viewBox="0 0 80 40">'
+            '<rect x="20" y="10" width="40" height="20" fill="#FF0000"/></svg>')
+
+
+def icon_href(svg=ICON_SVG):
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
+def test_svg_icon_is_rasterised_without_edge(tmp_path, monkeypatch):
+    pytest.importorskip("resvg_py")
+    from PIL import Image as PILImage
+    monkeypatch.setattr("visio_mcp_server.svg_import.find_edge", lambda: None)
+    path = image_to_png(icon_href(), str(tmp_path), str(tmp_path), "icon")
+    img = PILImage.open(path).convert("RGBA")
+    assert img.width == 320 and img.height == 160                      # aspect kept
+    assert img.getpixel((2, 2))[3] == 0                                 # transparent outside the drawing
+    assert img.getpixel((img.width // 2, img.height // 2)) == (255, 0, 0, 255)
+
+
+def test_svg_icon_without_any_rasteriser_is_a_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setattr("visio_mcp_server.svg_import._rasterize_with_resvg", lambda *a: False)
+    monkeypatch.setattr("visio_mcp_server.svg_import.find_edge", lambda: None)
+    with pytest.raises(SvgError, match="resvg-py"):
+        image_to_png(icon_href(), str(tmp_path), str(tmp_path), "icon")

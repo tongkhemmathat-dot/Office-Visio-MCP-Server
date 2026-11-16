@@ -825,8 +825,24 @@ def find_edge() -> Optional[str]:
     return next((p for p in EDGE_PATHS if os.path.exists(p)), None)
 
 
+def _rasterize_with_resvg(svg_bytes: bytes, png_path: str) -> bool:
+    """Render an SVG icon to a transparent PNG with resvg (no browser needed). False if unavailable or it fails."""
+    try:
+        import resvg_py
+    except ImportError:
+        return False
+    try:
+        png = resvg_py.svg_to_bytes(svg_string=svg_bytes.decode("utf-8"), width=ICON_RENDER_PX)
+    except Exception:
+        return False
+    with open(png_path, "wb") as f:
+        f.write(bytes(png))
+    return True
+
+
 def image_to_png(href: str, base_dir: str, work_dir: str, name: str) -> str:
-    """Return an image file Visio can import for an <image> href, rasterising SVG icons with headless Edge."""
+    """Return an image file Visio can import for an <image> href. SVG icons are rasterised with resvg
+    (preferred) or headless Edge."""
     m = re.match(r"data:image/([\w+.-]+);base64,(.*)", href, re.S)
     if m:
         kind, data = m.group(1).lower(), base64.b64decode(m.group(2))
@@ -852,9 +868,12 @@ def image_to_png(href: str, base_dir: str, work_dir: str, name: str) -> str:
         raise SvgError(f"Unsupported image type '{kind}'.")
 
     png_path = os.path.join(work_dir, f"{name}.png")
+    if _rasterize_with_resvg(data, png_path):
+        return png_path
     edge = find_edge()
     if not edge:
-        raise SvgError("Embedded SVG icons need Microsoft Edge (headless) to be rasterised, but it was not found.")
+        raise SvgError("Embedded SVG icons need the 'resvg-py' package or Microsoft Edge to be rasterised, "
+                       "but neither is available.")
     svg_path = os.path.join(work_dir, f"{name}.svg")
     html_path = os.path.join(work_dir, f"{name}.html")
     with open(svg_path, "wb") as f:
