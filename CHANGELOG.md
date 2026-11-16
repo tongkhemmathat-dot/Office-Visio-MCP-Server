@@ -22,6 +22,8 @@
   open vs solid head) instead of one fixed size.
 - `svg_to_visio`: embedded SVG icons are rasterised with `resvg-py` (no browser, keeps gradients and aspect ratio);
   headless Edge is only a fallback. `Pillow` and `resvg-py` are now dependencies.
+- `svg_to_visio`: shapes are named after their SVG `id`, placed on layers (Shapes, Connectors, Labels, Icons) and runs of
+  shapes from one `<g>` become named Visio groups (`group_shapes=False` to turn off).
 
 ## 1.1.0 - 2026-10-06
 

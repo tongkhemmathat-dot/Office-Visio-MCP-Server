@@ -57,6 +57,8 @@ class Rect:
     radius: float = 0.0
     fill_opacity: float = 1.0
     stroke_opacity: float = 1.0
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -71,6 +73,8 @@ class Ellipse:
     dash: Optional[str]
     fill_opacity: float = 1.0
     stroke_opacity: float = 1.0
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -87,6 +91,8 @@ class Polyline:
     stroke_opacity: float = 1.0
     arrow_size: float = 0.0      # arrowhead length in px from the <marker>; 0 = unknown
     arrow_open: bool = False     # marker drawn as an outline/chevron rather than a solid head
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -99,6 +105,8 @@ class Path:
     fill: Optional[str] = None
     fill_opacity: float = 1.0
     stroke_opacity: float = 1.0
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -115,6 +123,8 @@ class Text:
     rotation: float = 0.0        # degrees, clockwise (SVG convention), about (x, y)
     opacity: float = 1.0
     font_family: str = ""        # CSS font-family list as written in the SVG
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -125,6 +135,8 @@ class Image:
     height: float
     href: str
     opacity: float = 1.0
+    ident: str = ""          # id of the source element
+    group: str = ""          # ids of the enclosing <g> elements, outermost first, joined by '/'
 
 
 @dataclass
@@ -453,6 +465,7 @@ class Context:
     style: Dict[str, str]
     opacity: float = 1.0
     depth: int = 0
+    group: Tuple[str, ...] = ()
 
 
 class _Parser:
@@ -550,7 +563,13 @@ class _Parser:
                 self.doc.skipped.append(f"{k} on <{tag}> ignored")
         m = mat_mul(ctx.matrix, parse_transform(el.get("transform")))
         opacity = ctx.opacity * max(0.0, min(1.0, parse_length(style.get("opacity"), 1.0)))
-        sub = Context(m, style, opacity, ctx.depth)
+        group = ctx.group
+        if tag == "g":
+            name = el.get("id") or next(("".join(c.itertext()).strip() for c in el if _local(c.tag) == "title"), "")
+            if name:
+                group = group + (name,)
+        sub = Context(m, style, opacity, ctx.depth, group)
+        first_new = len(self.doc.items)
 
         if tag == "g" or tag == "a":
             for child in el:
@@ -593,6 +612,12 @@ class _Parser:
         else:
             self.doc.skipped.append(f"<{tag}>")
 
+        for item in self.doc.items[first_new:]:
+            if not item.group:
+                item.group = "/".join(group)
+            if not item.ident and tag not in ("g", "a", "switch"):
+                item.ident = el.get("id") or ""
+
     @staticmethod
     def switch_accepts(child) -> bool:
         """Conditional processing for <switch> children (feature strings count as supported, as in browsers)."""
@@ -629,7 +654,7 @@ class _Parser:
             self.doc.skipped.append("<use> nested too deeply")
             return
         offset = (1, 0, 0, 1, parse_length(el.get("x")), parse_length(el.get("y")))
-        sub = Context(mat_mul(ctx.matrix, offset), ctx.style, ctx.opacity, ctx.depth + 1)
+        sub = Context(mat_mul(ctx.matrix, offset), ctx.style, ctx.opacity, ctx.depth + 1, ctx.group)
         if _local(target.tag) == "symbol":
             if target.get("viewBox"):
                 self.doc.skipped.append("<symbol> viewBox ignored")

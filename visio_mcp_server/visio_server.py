@@ -10,6 +10,7 @@ import functools
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -1167,6 +1168,44 @@ def svg_draw_text(page, item, doc_height: float, font_id: int, default_family: s
         shape.CellsU("PinX").ResultIU = px * SVG_PX
         shape.CellsU("PinY").ResultIU = (doc_height - py) * SVG_PX
         shape.CellsU("Angle").ResultIU = -theta
+    return shape
+
+
+def svg_layer_name(item) -> str:
+    """Visio layer for a primitive: lines that are not closed are connectors, pictures are icons."""
+    if isinstance(item, svg_import.Text):
+        return "Labels"
+    if isinstance(item, svg_import.Image):
+        return "Icons"
+    if isinstance(item, svg_import.Polyline) and not item.closed and not item.fill:
+        return "Connectors"
+    return "Shapes"
+
+
+def svg_unique_name(raw: str, used: set) -> str:
+    """A Visio-safe, unique shape name derived from an SVG id ('' if there is nothing to name it by)."""
+    base = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw or "").strip("_")
+    if not base:
+        return ""
+    name, n = base, 2
+    while name.lower() in used:
+        name, n = f"{base}_{n}", n + 1
+    used.add(name.lower())
+    return name
+
+
+def svg_group_runs(groups: List[str]) -> List[tuple]:
+    """Runs of consecutive drawn shapes that share one non-empty SVG group: [(group, first, last), ...].
+
+    Only consecutive runs of two or more are returned, so grouping never changes the stacking order.
+    """
+    runs, start = [], 0
+    for i in range(1, len(groups) + 1):
+        if i == len(groups) or groups[i] != groups[start]:
+            if groups[start] and i - start >= 2:
+                runs.append((groups[start], start, i - 1))
+            start = i
+    return runs
 
 
 VIS_SECTION_GEOMETRY = 10
@@ -1200,7 +1239,8 @@ def svg_draw_path(page, item, px, py):
 
 
 @tool("importing SVG")
-async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str] = None) -> str:
+async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str] = None,
+                       group_shapes: bool = True) -> str:
     """Convert an SVG diagram into a new, editable Visio file (one native Visio shape per SVG element).
 
     The page gets the SVG's size (1 SVG px = 1/96 in) and every element keeps its position, colours,
@@ -1216,9 +1256,13 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
         svg_path: Path to the SVG file.
         output_path: Where to save the .vsdx. A bare file name goes to the Documents folder.
         export_png: Optional path for a PNG of the result, to compare against the SVG.
+        group_shapes: Turn runs of consecutive shapes that come from one SVG <g> into Visio groups
+                      (named after the group's id), so they move and copy together.
 
     Returns:
         Summary of what was created and what was skipped.
+
+    Shapes are named after their SVG id and placed on layers: Shapes, Connectors, Labels, Icons.
     """
     svg = svg_import.parse_svg(resolve_path(svg_path))
     page_w, page_h = svg.width * SVG_PX, svg.height * SVG_PX
@@ -1240,6 +1284,22 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
 
     counts = {"rect": 0, "ellipse": 0, "polyline": 0, "path": 0, "text": 0, "image": 0}
     work_dir = tempfile.mkdtemp(prefix="svg_import_")
+    layers, used_names, drawn = {}, set(), []
+
+    def decorate(item, shape) -> None:
+        """Name the shape after its SVG id and put it on its layer; cosmetic, so never fatal."""
+        try:
+            name = svg_unique_name(item.ident, used_names)
+            if name:
+                shape.NameU = name
+            layer_name = svg_layer_name(item)
+            if layer_name not in layers:
+                layers[layer_name] = page.Layers.Add(layer_name)
+            layers[layer_name].Add(shape, 0)
+        except Exception:
+            pass
+        drawn.append((item, shape))
+
     try:
         for i, item in enumerate(svg.items):
             if isinstance(item, svg_import.Rect):
@@ -1249,12 +1309,14 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                 if item.radius > 0:
                     shape.CellsU("Rounding").ResultIU = min(item.radius, item.width / 2, item.height / 2) * SVG_PX
                 counts["rect"] += 1
+                decorate(item, shape)
             elif isinstance(item, svg_import.Ellipse):
                 shape = page.DrawOval(px(item.cx - item.rx), py(item.cy + item.ry),
                                       px(item.cx + item.rx), py(item.cy - item.ry))
                 svg_style_fill(shape, item.fill, item.fill_opacity)
                 svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
                 counts["ellipse"] += 1
+                decorate(item, shape)
             elif isinstance(item, svg_import.Polyline):
                 coords = []
                 for x, y in item.points:
@@ -1267,15 +1329,18 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                         shape.CellsU(cell).FormulaU = str(ARROW_OPEN if item.arrow_open else ARROW_FILLED_TRIANGLE)
                         shape.CellsU(cell + "Size").FormulaU = str(svg_arrow_size(item.arrow_size))
                 counts["polyline"] += 1
+                decorate(item, shape)
             elif isinstance(item, svg_import.Path):
                 shape = svg_draw_path(page, item, px, py)
                 svg_style_fill(shape, item.fill, item.fill_opacity)
                 svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
                 counts["path"] += 1
+                decorate(item, shape)
             elif isinstance(item, svg_import.Text):
-                svg_draw_text(page, item, svg.height, svg_font_id(doc, item.font_family or svg.font_family, font_cache),
-                              svg.font_family)
+                shape = svg_draw_text(page, item, svg.height,
+                                      svg_font_id(doc, item.font_family or svg.font_family, font_cache), svg.font_family)
                 counts["text"] += 1
+                decorate(item, shape)
             elif isinstance(item, svg_import.Image):
                 picture = page.Import(svg_import.image_to_png(item.href, svg.base_dir, work_dir, f"img{i}"))
                 picture.CellsU("LockAspect").FormulaU = "0"
@@ -1286,12 +1351,32 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                 if item.opacity < 1:
                     picture.CellsU("FillForegndTrans").FormulaU = "%d%%" % round((1 - item.opacity) * 100)
                 counts["image"] += 1
+                decorate(item, picture)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+    grouped = 0
+    if group_shapes:
+        try:
+            window = get_visio_app().ActiveWindow
+            for group, first, last in svg_group_runs([item.group for item, _ in drawn]):
+                window.DeselectAll()
+                for _, shape in drawn[first:last + 1]:
+                    window.Select(shape, 2)   # visSelect: add to the selection
+                container = window.Selection.Group()
+                name = svg_unique_name(group.rsplit("/", 1)[-1], used_names)
+                if name:
+                    container.NameU = name
+                grouped += 1
+            window.DeselectAll()
+        except Exception as e:
+            svg.skipped.append(f"grouping failed ({e})")
 
     doc.Save()
     summary = ", ".join(f"{n} {kind}" for kind, n in counts.items() if n)
     result = f"Created {out} ({page_w:.2f} x {page_h:.2f} in): {summary}."
+    if grouped:
+        result += f" Grouped {grouped} SVG group(s)."
     if svg.skipped:
         result += f" Skipped or approximated {len(svg.skipped)} thing(s): {', '.join(sorted(set(svg.skipped)))}."
     if export_png:

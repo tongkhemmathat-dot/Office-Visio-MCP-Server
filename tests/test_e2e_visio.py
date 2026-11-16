@@ -217,3 +217,26 @@ def test_svg_to_visio_cuts_holes_in_multi_subpath_paths(tmp_path):
         assert red and min(red) < w // 2 < max(red)
     finally:
         run(server.close_document(out))
+
+
+def test_svg_to_visio_names_layers_and_groups(tmp_path):
+    svg = tmp_path / "n.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="288">'
+        '<rect id="lonely" x="10" y="10" width="40" height="20" fill="#CCCCCC"/>'
+        '<g id="tier"><rect id="box" x="100" y="100" width="60" height="40" fill="#E8F6F7"/>'
+        '<text id="caption" x="130" y="125" font-size="13" text-anchor="middle">Web</text></g>'
+        '<polyline points="160,120 300,120" stroke="#000" fill="none"/></svg>', encoding="utf8")
+    out = str(tmp_path / "n.vsdx")
+    result = run(server.svg_to_visio(str(svg), out))
+    try:
+        assert "Grouped 1 SVG group" in result
+        page = server.get_page(server.get_document(out))
+        names = {s.NameU: s for s in page.Shapes}
+        assert "lonely" in names and "tier" in names
+        group = names["tier"]
+        assert group.Type == 2 and group.Shapes.Count == 2                      # visTypeGroup, box + caption
+        assert {s.NameU for s in group.Shapes} == {"box", "caption"}
+        assert {layer.Name for layer in page.Layers} >= {"Shapes", "Labels", "Connectors"}
+    finally:
+        run(server.close_document(out))

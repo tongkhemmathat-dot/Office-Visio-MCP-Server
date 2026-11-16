@@ -393,3 +393,20 @@ def test_svg_icon_without_any_rasteriser_is_a_clear_error(tmp_path, monkeypatch)
     monkeypatch.setattr("visio_mcp_server.svg_import.find_edge", lambda: None)
     with pytest.raises(SvgError, match="resvg-py"):
         image_to_png(icon_href(), str(tmp_path), str(tmp_path), "icon")
+
+
+def test_ids_and_group_names_are_kept(tmp_path):
+    doc = svg_of(tmp_path, '<g id="vpc"><rect id="subnet" x="1" y="1" width="5" height="5" fill="#000"/>'
+                           '<g><title>Web tier</title><text id="lbl" x="2" y="3">ALB</text>'
+                           '<circle cx="3" cy="3" r="1" fill="#F00"/></g></g><rect x="9" y="9" width="2" height="2"/>')
+    rect, text, circle, loose = doc.items
+    assert (rect.ident, rect.group) == ("subnet", "vpc")
+    assert (text.ident, text.group) == ("lbl", "vpc/Web tier")
+    assert (circle.ident, circle.group) == ("", "vpc/Web tier")
+    assert (loose.ident, loose.group) == ("", "")
+
+
+def test_use_keeps_the_group_of_the_use_site(tmp_path):
+    doc = svg_of(tmp_path, '<defs><rect id="r" width="2" height="2" fill="#000"/></defs>'
+                           '<g id="g1"><use href="#r" x="3"/></g>')
+    assert doc.items[0].group == "g1"
