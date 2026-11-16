@@ -69,6 +69,7 @@ The server provides the following functionality:
   (`add_rack`, `add_rack_device`, `list_rack`)
 - Search shapes inside stencils (`search_stencil_shapes`), delete shapes (`delete_shape`)
 - Export to PNG, JPG, GIF, BMP, SVG or PDF (`export_diagram`)
+- Convert an SVG diagram into an editable `.vsdx` (`svg_to_visio`): rect, polyline, text and embedded PNG/SVG icons keep their position, colours and z-order. Embedded SVG icons are rasterised with headless Edge
 
 ### Stencils
 - List the Visio stencils installed on the machine (Visio Content, My Shapes)

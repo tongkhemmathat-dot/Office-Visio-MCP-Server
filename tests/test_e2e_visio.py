@@ -146,3 +146,29 @@ def test_raster_export_failure_points_to_pdf(diagram, tmp_path, monkeypatch):
     monkeypatch.setattr(server, "get_page", lambda doc: Broken())
     result = run(server.export_diagram(diagram, str(tmp_path / "x.png")))
     assert result.startswith("Error exporting diagram:") and "pdf or .svg" in result
+
+
+def test_svg_to_visio_creates_native_shapes(tmp_path):
+    svg = tmp_path / "d.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="288" viewBox="0 0 480 288">'
+        '<rect width="480" height="288" fill="#FFFFFF"/>'
+        '<rect x="96" y="96" width="192" height="96" fill="#E8F6F7" stroke="#00A4A6" stroke-width="2"/>'
+        '<polyline points="96,48 288,48" fill="none" stroke="#232F3E" stroke-width="2" marker-end="url(#m)"/>'
+        '<text x="192" y="150" font-size="13" text-anchor="middle" fill="#232F3E">'
+        '<tspan x="192" dy="0">Hello</tspan><tspan x="192" dy="16">World</tspan></text></svg>',
+        encoding="utf8")
+    out = str(tmp_path / "d.vsdx")
+    result = run(server.svg_to_visio(str(svg), out, export_png=str(tmp_path / "d.png")))
+    try:
+        assert "1 rect, 1 polyline, 1 text" in result
+        page = server.get_page(server.get_document(out))
+        assert abs(page.PageSheet.Cells("PageWidth").ResultIU - 5.0) < 1e-6
+        assert abs(page.PageSheet.Cells("PageHeight").ResultIU - 3.0) < 1e-6
+        rect = next(s for s in page.Shapes if s.Text == "" and s.CellsU("FillPattern").ResultIU == 1)
+        # SVG y=96..192 of 288 -> Visio y (flipped) = 1.0..2.0 in; x = 1.0..3.0 in
+        assert abs(rect.CellsU("PinX").ResultIU - 2.0) < 1e-6 and abs(rect.CellsU("PinY").ResultIU - 1.5) < 1e-6
+        assert any(s.Text == "Hello\nWorld" for s in page.Shapes)
+        assert os.path.exists(tmp_path / "d.png")
+    finally:
+        run(server.close_document(out))

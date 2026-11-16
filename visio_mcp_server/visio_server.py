@@ -9,7 +9,9 @@ import atexit
 import functools
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 import winreg
 from typing import List, Optional
@@ -22,12 +24,14 @@ try:
     from visio_mcp_server.diagram import (RACK_UNIT, check_rack_fit, free_ranges, group_bounds,
                                           normalize_spec, rack_device_bottom, tier_layout)
     from visio_mcp_server.styles import apply_shape_style, style_geometry, validate_style
+    from visio_mcp_server import svg_import
 except ImportError:
     # Started as a plain script without the package on PYTHONPATH
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from visio_mcp_server.diagram import (RACK_UNIT, check_rack_fit, free_ranges, group_bounds,
                                           normalize_spec, rack_device_bottom, tier_layout)
     from visio_mcp_server.styles import apply_shape_style, style_geometry, validate_style
+    from visio_mcp_server import svg_import
 
 mcp = FastMCP("visio-server")
 
@@ -1066,6 +1070,145 @@ async def export_diagram(file_path: str, output_path: str) -> str:
             raise ToolError(f"Visio could not render this page as {extension} ({e}). Very large pages with many "
                             "images can fail as bitmaps: export .pdf or .svg instead.")
     return f"Exported to: {out}"
+
+
+# --- SVG import ----------------------------------------------------------------
+
+SVG_PX = 1 / 96.0           # one SVG user unit in inches (CSS pixel)
+ARROW_FILLED_TRIANGLE = 13
+
+
+def svg_rgb(color: str) -> str:
+    return "RGB(%d,%d,%d)" % (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+
+
+def svg_font_id(doc, family: str) -> int:
+    """ID of the first font in a CSS font-family list that Visio knows, else the first font."""
+    wanted = [f.strip().strip("'\"").lower() for f in family.split(",") if f.strip()]
+    fonts = {doc.Fonts.Item(i).Name.lower(): doc.Fonts.Item(i).ID for i in range(1, doc.Fonts.Count + 1)}
+    for name in wanted:
+        if name in fonts:
+            return fonts[name]
+    return doc.Fonts.Item(1).ID
+
+
+def svg_style_line(shape, stroke, width: float, dashed: bool) -> None:
+    if not stroke:
+        shape.CellsU("LinePattern").FormulaU = "0"
+        return
+    shape.CellsU("LineColor").FormulaU = svg_rgb(stroke)
+    shape.CellsU("LineWeight").ResultIU = width * SVG_PX
+    if dashed:
+        shape.CellsU("LinePattern").FormulaU = "2"
+
+
+def svg_draw_text(page, item, doc_height: float, font_id: int) -> None:
+    """Draw one <text> as a borderless text box whose first baseline sits at item.y."""
+    fs = item.font_size
+    width = max(len(line) for line in item.lines) * fs * 0.62 + 12
+    height = item.line_height * (len(item.lines) - 1) + fs * 1.25
+    top = item.y - fs * 0.95
+    left = {"middle": item.x - width / 2, "end": item.x - width}.get(item.anchor, item.x)
+    shape = page.DrawRectangle(left * SVG_PX, (doc_height - top - height) * SVG_PX,
+                               (left + width) * SVG_PX, (doc_height - top) * SVG_PX)
+    if item.halo:
+        shape.CellsU("FillPattern").FormulaU = "1"
+        shape.CellsU("FillForegnd").FormulaU = "RGB(255,255,255)"
+    else:
+        shape.CellsU("FillPattern").FormulaU = "0"
+    shape.CellsU("LinePattern").FormulaU = "0"
+    for cell in ("LeftMargin", "RightMargin", "TopMargin", "BottomMargin"):
+        shape.CellsU(cell).ResultIU = 0
+    shape.CellsU("VerticalAlign").FormulaU = "0"
+    shape.CellsU("Para.HorzAlign").FormulaU = {"start": "0", "middle": "1", "end": "2"}.get(item.anchor, "0")
+    shape.Text = "\n".join(item.lines)
+    shape.CellsU("Char.Size").FormulaU = "%g pt" % (fs * 0.75)
+    for cell in ("Char.Font", "Char.ComplexScriptFont", "Char.AsianFont"):
+        shape.CellsU(cell).FormulaU = str(font_id)
+    shape.CellsU("Char.Color").FormulaU = svg_rgb(item.fill)
+    shape.CellsU("Char.Style").FormulaU = "1" if item.bold else "0"
+    if len(item.lines) > 1:
+        shape.CellsU("Para.SpLine").FormulaU = "%g" % -(item.line_height / (fs * 1.2))
+    shape.CellsU("TxtWidth").ResultIU = width * SVG_PX
+
+
+@tool("importing SVG")
+async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str] = None) -> str:
+    """Convert an SVG diagram into a new, editable Visio file (one native Visio shape per SVG element).
+
+    The page gets the SVG's size (1 SVG px = 1/96 in) and every element keeps its position, colours,
+    line style, text and z-order. Embedded icons (PNG or SVG data URIs, or image files next to the SVG)
+    are inserted as pictures; SVG icons are rasterised first, which needs Microsoft Edge.
+    Supported elements: rect, polyline (with end arrow), text/tspan, image. Others are skipped and listed.
+
+    Args:
+        svg_path: Path to the SVG file.
+        output_path: Where to save the .vsdx. A bare file name goes to the Documents folder.
+        export_png: Optional path for a PNG of the result, to compare against the SVG.
+
+    Returns:
+        Summary of what was created and what was skipped.
+    """
+    svg = svg_import.parse_svg(resolve_path(svg_path))
+    page_w, page_h = svg.width * SVG_PX, svg.height * SVG_PX
+    out = resolve_path(output_path)
+    if not out.lower().endswith(".vsdx"):
+        raise ToolError("output_path must end with .vsdx")
+
+    doc, out = create_document(save_path=out, page_size=(page_w, page_h))
+    page = get_page(doc)
+    for cell in ("PageLeftMargin", "PageRightMargin", "PageTopMargin", "PageBottomMargin"):
+        page.PageSheet.Cells(cell).ResultIU = 0
+    font_id = svg_font_id(doc, svg.font_family)
+
+    counts = {"rect": 0, "polyline": 0, "text": 0, "image": 0}
+    work_dir = tempfile.mkdtemp(prefix="svg_import_")
+    try:
+        for i, item in enumerate(svg.items):
+            if isinstance(item, svg_import.Rect):
+                shape = page.DrawRectangle(item.x * SVG_PX, (svg.height - item.y - item.height) * SVG_PX,
+                                           (item.x + item.width) * SVG_PX, (svg.height - item.y) * SVG_PX)
+                if item.fill:
+                    shape.CellsU("FillPattern").FormulaU = "1"
+                    shape.CellsU("FillForegnd").FormulaU = svg_rgb(item.fill)
+                else:
+                    shape.CellsU("FillPattern").FormulaU = "0"
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dashed)
+                counts["rect"] += 1
+            elif isinstance(item, svg_import.Polyline):
+                coords = []
+                for x, y in item.points:
+                    coords += [x * SVG_PX, (svg.height - y) * SVG_PX]
+                shape = page.DrawPolyline(tuple(coords), 0)
+                shape.CellsU("FillPattern").FormulaU = "0"
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dashed)
+                if item.arrow_end:
+                    shape.CellsU("EndArrow").FormulaU = str(ARROW_FILLED_TRIANGLE)
+                    shape.CellsU("EndArrowSize").FormulaU = "1"
+                counts["polyline"] += 1
+            elif isinstance(item, svg_import.Text):
+                svg_draw_text(page, item, svg.height, font_id)
+                counts["text"] += 1
+            elif isinstance(item, svg_import.Image):
+                picture = page.Import(svg_import.image_to_png(item.href, svg.base_dir, work_dir, f"img{i}"))
+                picture.CellsU("LockAspect").FormulaU = "0"
+                picture.CellsU("Width").ResultIU = item.width * SVG_PX
+                picture.CellsU("Height").ResultIU = item.height * SVG_PX
+                picture.CellsU("PinX").ResultIU = (item.x + item.width / 2) * SVG_PX
+                picture.CellsU("PinY").ResultIU = (svg.height - item.y - item.height / 2) * SVG_PX
+                counts["image"] += 1
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    doc.Save()
+    summary = ", ".join(f"{n} {kind}" for kind, n in counts.items() if n)
+    result = f"Created {out} ({page_w:.2f} x {page_h:.2f} in): {summary}."
+    if svg.skipped:
+        skipped = sorted(set(svg.skipped))
+        result += f" Skipped {len(svg.skipped)} unsupported element(s): {', '.join(skipped)}."
+    if export_png:
+        result += " " + await export_diagram(out, export_png)
+    return result
 
 
 @tool("deleting shape")

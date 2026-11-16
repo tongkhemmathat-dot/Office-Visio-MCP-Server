@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `svg_to_visio`: convert an SVG into a new `.vsdx` with one native Visio shape per element (rect, polyline
+  with end arrow, text/tspan, image). Icons are inserted as PNG pictures; SVG icons are rasterised with
+  headless Edge. Unsupported elements are listed in the result; `export_png` renders the result for comparison.
+- `svg_import.py`: Visio-free SVG parser with unit tests.
+
 ## 1.1.0 - 2026-10-06
 
 Focus: making the server useful for system and network engineers (real hardware stencils,
