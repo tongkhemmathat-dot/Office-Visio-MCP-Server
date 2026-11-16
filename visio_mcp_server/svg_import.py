@@ -10,8 +10,8 @@ Everything is resolved here, so the primitives are in page coordinates (SVG px, 
   * rect (incl. rx), circle, ellipse, line, polyline, polygon, path (curves and arcs are flattened
     into line segments), text/tspan and image (data URIs or files next to the SVG).
 Not supported (reported in SvgDocument.skipped): filters, masks, clip-paths, patterns, markers other
-than start/end arrows, nested <svg>, foreignObject. A path with several subpaths becomes several
-polylines, so holes are not cut out.
+than start/end arrows, nested <svg>, foreignObject. A path with several subpaths becomes one Path
+(drawn even-odd, so holes are cut out; SVG's default nonzero rule differs only for overlapping same-direction subpaths).
 """
 import base64
 import math
@@ -23,6 +23,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+SVG_NS_PREFIX = "{http://www.w3.org/2000/svg}"
 XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 DEFAULT_FONT_SIZE = 16.0
 EDGE_PATHS = (
@@ -79,6 +80,18 @@ class Polyline:
     arrow_end: bool = False
     arrow_start: bool = False
     closed: bool = False
+    fill: Optional[str] = None
+    fill_opacity: float = 1.0
+    stroke_opacity: float = 1.0
+
+
+@dataclass
+class Path:
+    """Several subpaths drawn as ONE shape, so that holes (glyph counters, ring icons) are cut out."""
+    subpaths: List[List[Tuple[float, float]]]   # a closed subpath repeats its first point at the end
+    stroke: Optional[str]
+    stroke_width: float
+    dash: Optional[str]
     fill: Optional[str] = None
     fill_opacity: float = 1.0
     stroke_opacity: float = 1.0
@@ -519,6 +532,8 @@ class _Parser:
     # -- walking
     def walk(self, el, ctx: Context) -> None:
         tag = _local(el.tag)
+        if el.tag.startswith("{") and not el.tag.startswith(SVG_NS_PREFIX):
+            return  # editor metadata (sodipodi, inkscape, rdf, ...), not drawing content
         if tag in ("defs", "title", "desc", "metadata", "style", "symbol", "clipPath", "mask", "marker",
                    "linearGradient", "radialGradient", "pattern", "stop", "script", "filter", ""):
             return
@@ -534,6 +549,13 @@ class _Parser:
 
         if tag == "g" or tag == "a":
             for child in el:
+                self.walk(child, sub)
+        elif tag == "switch":
+            # draw.io: <switch><foreignObject>html label</foreignObject><text>plain fallback</text></switch>
+            has_fallback = any(_local(c.tag) != "foreignObject" for c in el)
+            for child in el:
+                if _local(child.tag) == "foreignObject" and has_fallback:
+                    continue
                 self.walk(child, sub)
         elif tag == "use":
             self.use(el, sub)
@@ -633,12 +655,18 @@ class _Parser:
         st = self.stroke_and_fill(ctx.style, ctx.matrix, ctx.opacity, filled=filled)
         if st["fill"] is None and st["stroke"] is None:
             return
+        placed = []
         for pts, closed in subpaths:
             pts = [mat_apply(ctx.matrix, px, py) for px, py in pts]
             if st["fill"] is not None:
                 closed = True
             if closed and pts[0] != pts[-1]:
                 pts = pts + [pts[0]]
+            placed.append((pts, closed))
+        if len(placed) > 1:
+            self.doc.items.append(Path([pts for pts, _ in placed], **st))
+            return
+        for pts, closed in placed:
             self.doc.items.append(Polyline(
                 pts, closed=closed,
                 arrow_end=ctx.style.get("marker-end", "none") != "none" and not closed,

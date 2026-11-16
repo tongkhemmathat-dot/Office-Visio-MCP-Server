@@ -10,6 +10,9 @@
   transforms and viewBox, rect (rx), circle, ellipse, line, polygon, path (curves/arcs flattened), CSS
   (`<style>` rules, `style` attribute, inheritance), opacity, gradients (average colour), start/end arrows,
   rotated text and `font-size` units. Unsupported features (filter, mask, clip-path, foreignObject) are reported.
+- `svg_to_visio`: a path with several subpaths is one Visio shape (even-odd fill), so glyph counters and ring
+  icons keep their holes; draw.io `<switch>` and editor-namespace elements are handled; `examples/svg_compare.py`
+  converts SVGs and renders them next to the browser's rendering.
 
 ## 1.1.0 - 2026-10-06
 

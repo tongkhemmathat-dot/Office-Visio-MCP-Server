@@ -198,3 +198,22 @@ def test_svg_to_visio_groups_transforms_paths_and_opacity(tmp_path):
         assert abs(text.CellsU("Angle").ResultIU - 3.141592653589793 / 2) < 1e-6   # -90 deg clockwise
     finally:
         run(server.close_document(out))
+
+
+def test_svg_to_visio_cuts_holes_in_multi_subpath_paths(tmp_path):
+    from PIL import Image
+    svg = tmp_path / "ring.svg"
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288">'
+                   '<path d="M48 48H240V240H48Z M96 96H192V192H96Z" fill="#FF0000"/></svg>', encoding="utf8")
+    out, png = str(tmp_path / "ring.vsdx"), str(tmp_path / "ring.png")
+    result = run(server.svg_to_visio(str(svg), out, export_png=png))
+    try:
+        assert "1 path" in result
+        img = Image.open(png).convert("RGB")
+        w, h = img.size
+        assert img.getpixel((w // 2, h // 2)) == (255, 255, 255)           # the hole
+        row = [img.getpixel((x, h // 2)) for x in range(w)]                   # a red ring exists on both sides
+        red = [x for x, (r, g, b) in enumerate(row) if r > 200 and g < 60 and b < 60]
+        assert red and min(red) < w // 2 < max(red)
+    finally:
+        run(server.close_document(out))

@@ -1158,6 +1158,36 @@ def svg_draw_text(page, item, doc_height: float, font_id: int) -> None:
         shape.CellsU("Angle").ResultIU = -theta
 
 
+VIS_SECTION_GEOMETRY = 10
+VIS_TAG_MOVE_TO = 138
+VIS_TAG_LINE_TO = 139
+
+
+def svg_draw_path(page, item, px, py):
+    """Draw several subpaths as one shape; Visio fills such a shape even-odd, so inner subpaths are holes."""
+    pts = [(px(x), py(y)) for sub in item.subpaths for x, y in sub]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    w, h = max(x1 - x0, 1e-4), max(y1 - y0, 1e-4)
+    first = item.subpaths[0]
+    shape = page.DrawPolyline(tuple(c for x, y in first[:2] for c in (px(x), py(y))), 0)
+    for row in range(shape.RowCount(VIS_SECTION_GEOMETRY) - 1, 0, -1):   # keep only the header row
+        shape.DeleteRow(VIS_SECTION_GEOMETRY, row)
+    shape.CellsSRC(VIS_SECTION_GEOMETRY, 0, 0).FormulaU = "FALSE"   # NoFill: an open first subpath sets it TRUE
+    shape.CellsSRC(VIS_SECTION_GEOMETRY, 0, 1).FormulaU = "FALSE"   # NoLine
+    shape.CellsU("Width").ResultIU = w
+    shape.CellsU("Height").ResultIU = h
+    shape.CellsU("PinX").ResultIU = x0 + w / 2
+    shape.CellsU("PinY").ResultIU = y0 + h / 2
+    for sub in item.subpaths:
+        for k, (x, y) in enumerate(sub):
+            row = shape.RowCount(VIS_SECTION_GEOMETRY)
+            shape.AddRow(VIS_SECTION_GEOMETRY, row, VIS_TAG_MOVE_TO if k == 0 else VIS_TAG_LINE_TO)
+            shape.CellsSRC(VIS_SECTION_GEOMETRY, row, 0).FormulaU = "Width*%g" % ((px(x) - x0) / w)
+            shape.CellsSRC(VIS_SECTION_GEOMETRY, row, 1).FormulaU = "Height*%g" % ((py(y) - y0) / h)
+    return shape
+
+
 @tool("importing SVG")
 async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str] = None) -> str:
     """Convert an SVG diagram into a new, editable Visio file (one native Visio shape per SVG element).
@@ -1169,7 +1199,7 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
     Supported: g, use/symbol, transforms, rect (incl. rounded), circle, ellipse, line, polyline, polygon,
     path (curves are flattened to line segments), text/tspan, image, <style> rules, gradients (as their
     average colour). Not supported: filters, masks, clip-paths, patterns; they are listed in the result.
-    A path with several subpaths becomes several shapes, so holes are not cut out.
+    A path with several subpaths becomes one shape with even-odd fill (holes are cut out).
 
     Args:
         svg_path: Path to the SVG file.
@@ -1197,7 +1227,7 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
     def py(y: float) -> float:
         return (svg.height - y) * SVG_PX
 
-    counts = {"rect": 0, "ellipse": 0, "polyline": 0, "text": 0, "image": 0}
+    counts = {"rect": 0, "ellipse": 0, "polyline": 0, "path": 0, "text": 0, "image": 0}
     work_dir = tempfile.mkdtemp(prefix="svg_import_")
     try:
         for i, item in enumerate(svg.items):
@@ -1226,6 +1256,11 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                         shape.CellsU(cell).FormulaU = str(ARROW_FILLED_TRIANGLE)
                         shape.CellsU(cell + "Size").FormulaU = "1"
                 counts["polyline"] += 1
+            elif isinstance(item, svg_import.Path):
+                shape = svg_draw_path(page, item, px, py)
+                svg_style_fill(shape, item.fill, item.fill_opacity)
+                svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
+                counts["path"] += 1
             elif isinstance(item, svg_import.Text):
                 svg_draw_text(page, item, svg.height, font_id)
                 counts["text"] += 1

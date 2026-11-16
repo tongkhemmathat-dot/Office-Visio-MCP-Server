@@ -4,7 +4,7 @@ import pytest
 
 import math
 
-from visio_mcp_server.svg_import import (Ellipse, Image, Polyline, Rect, SvgError, Text, image_to_png,
+from visio_mcp_server.svg_import import (Ellipse, Image, Path, Polyline, Rect, SvgError, Text, image_to_png,
                                          parse_color, parse_path, parse_svg, parse_transform)
 
 PNG_1PX = base64.b64encode(
@@ -176,9 +176,15 @@ def test_path_arc_flags_without_separators():
     assert pts[-1] == pytest.approx((20, 0))
 
 
-def test_path_multiple_subpaths_become_multiple_polylines(tmp_path):
-    items = svg_of(tmp_path, '<path d="M0 0 L5 5 M10 10 L20 20" stroke="#000" fill="none"/>').items
-    assert len(items) == 2 and items[1].points == [(10, 10), (20, 20)]
+def test_path_multiple_subpaths_become_one_path(tmp_path):
+    item, = svg_of(tmp_path, '<path d="M0 0 L5 5 M10 10 L20 20" stroke="#000" fill="none"/>').items
+    assert isinstance(item, Path) and item.subpaths == [[(0, 0), (5, 5)], [(10, 10), (20, 20)]]
+
+
+def test_ring_path_keeps_both_subpaths_closed(tmp_path):
+    item, = svg_of(tmp_path, '<path d="M0 0H20V20H0Z M5 5H15V15H5Z" fill="#000"/>').items
+    assert isinstance(item, Path) and len(item.subpaths) == 2
+    assert all(sub[0] == sub[-1] for sub in item.subpaths) and item.fill == "#000000"
 
 
 def test_filled_open_path_is_closed(tmp_path):
@@ -285,3 +291,24 @@ def test_parse_transform(text, expected):
 def test_rotate_about_point():
     from visio_mcp_server.svg_import import mat_apply
     assert mat_apply(parse_transform("rotate(90 10 10)"), 20, 10) == pytest.approx((10, 20))
+
+
+def test_switch_draws_fallback_text_not_foreign_object(tmp_path):
+    doc = svg_of(tmp_path, '<switch><foreignObject width="10" height="10"><div>html</div></foreignObject>'
+                           '<text x="5" y="9" font-size="10">plain</text></switch>')
+    assert [type(i) for i in doc.items] == [Text] and doc.items[0].lines == ["plain"]
+    assert doc.skipped == []
+
+
+def test_switch_without_fallback_reports_foreign_object(tmp_path):
+    doc = svg_of(tmp_path, '<switch><foreignObject width="10" height="10"/></switch>')
+    assert doc.items == [] and any("foreignObject" in s for s in doc.skipped)
+
+
+def test_editor_namespaces_are_ignored_silently(tmp_path):
+    p = tmp_path / "e.svg"
+    p.write_text('<svg xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/'
+                 'sodipodi-0.dtd" width="10" height="10"><sodipodi:namedview id="n"/>'
+                 '<rect x="1" y="1" width="3" height="3" fill="#000"/></svg>')
+    doc = parse_svg(str(p))
+    assert len(doc.items) == 1 and doc.skipped == []
