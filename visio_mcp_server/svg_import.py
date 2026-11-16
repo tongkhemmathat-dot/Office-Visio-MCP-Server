@@ -23,6 +23,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from visio_mcp_server import svg_html
+
 SVG_NS_PREFIX = "{http://www.w3.org/2000/svg}"
 XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 DEFAULT_FONT_SIZE = 16.0
@@ -552,12 +554,28 @@ class _Parser:
             for child in el:
                 self.walk(child, sub)
         elif tag == "switch":
-            # draw.io: <switch><foreignObject>html label</foreignObject><text>plain fallback</text></switch>
-            has_fallback = any(_local(c.tag) != "foreignObject" for c in el)
+            # Only the first child whose conditions pass is drawn. draw.io writes
+            #   <switch><foreignObject>html label</foreignObject><text>truncated copy</text></switch>
+            # and a closing <switch><g requiredFeatures=.../><a><text>Text is not SVG...</text></a></switch>
+            # whose warning browsers never show. The plain <text> is used only if the label is unreadable.
+            drawn = unreadable = False
             for child in el:
-                if _local(child.tag) == "foreignObject" and has_fallback:
+                if not self.switch_accepts(child):
+                    continue
+                if _local(child.tag) == "foreignObject":
+                    if self.foreign(child, sub):
+                        drawn = True
+                        break
+                    unreadable = True
                     continue
                 self.walk(child, sub)
+                drawn = True
+                break
+            if unreadable and not drawn:
+                self.doc.skipped.append("<foreignObject>")
+        elif tag == "foreignObject":
+            if not self.foreign(el, sub):
+                self.doc.skipped.append("<foreignObject>")
         elif tag == "use":
             self.use(el, sub)
         elif tag == "rect":
@@ -572,6 +590,32 @@ class _Parser:
             self.image(el, sub)
         else:
             self.doc.skipped.append(f"<{tag}>")
+
+    @staticmethod
+    def switch_accepts(child) -> bool:
+        """Conditional processing for <switch> children (feature strings count as supported, as in browsers)."""
+        if not isinstance(child.tag, str) or (child.tag.startswith("{") and not child.tag.startswith(SVG_NS_PREFIX)):
+            return False
+        ext = child.get("requiredExtensions")
+        if ext is not None and "xhtml" not in ext.lower():
+            return False
+        lang = child.get("systemLanguage")
+        return lang is None or any(l.strip().lower().startswith("en") for l in lang.split(","))
+
+    def foreign(self, fo, ctx: Context) -> bool:
+        """Turn an HTML label in a <foreignObject> into a Text. False if it holds no readable text."""
+        label = svg_html.parse_label(fo)
+        if label is None:
+            return False
+        m = ctx.matrix
+        x, y = mat_apply(m, label.anchor_x, label.baseline_y)
+        scale = _scale_of(m)
+        self.doc.items.append(Text(
+            label.lines, x, y, label.font_size * scale,
+            {"left": "start", "right": "end"}.get(label.align, "middle"),
+            parse_color(label.color) or "#000000", label.bold, label.line_height * scale, False,
+            opacity=ctx.opacity, font_family=label.font_family))
+        return True
 
     def use(self, el, ctx: Context) -> None:
         href = el.get(XLINK_HREF) or el.get("href") or ""

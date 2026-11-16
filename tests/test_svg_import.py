@@ -293,9 +293,9 @@ def test_rotate_about_point():
     assert mat_apply(parse_transform("rotate(90 10 10)"), 20, 10) == pytest.approx((10, 20))
 
 
-def test_switch_draws_fallback_text_not_foreign_object(tmp_path):
-    doc = svg_of(tmp_path, '<switch><foreignObject width="10" height="10"><div>html</div></foreignObject>'
-                           '<text x="5" y="9" font-size="10">plain</text></switch>')
+def test_switch_without_readable_label_uses_fallback_text(tmp_path):
+    doc = svg_of(tmp_path, '<switch><foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml">'
+                           '</div></foreignObject><text x="5" y="9" font-size="10">plain</text></switch>')
     assert [type(i) for i in doc.items] == [Text] and doc.items[0].lines == ["plain"]
     assert doc.skipped == []
 
@@ -312,3 +312,30 @@ def test_editor_namespaces_are_ignored_silently(tmp_path):
                  '<rect x="1" y="1" width="3" height="3" fill="#000"/></svg>')
     doc = parse_svg(str(p))
     assert len(doc.items) == 1 and doc.skipped == []
+
+
+def test_switch_prefers_the_html_label_over_truncated_fallback(tmp_path):
+    body = ('<g transform="translate(0.5,0.5)"><switch><foreignObject width="100%" height="100%">'
+            '<div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; '
+            'justify-content: unsafe center; width: 100px; height: 1px; padding-top: 40px; margin-left: 10px;">'
+            '<div style="text-align: center; font-size: 0px;"><div style="display: inline-block; font-size: 12px; '
+            'font-family: Helvetica; color: #112233; line-height: 1.2; white-space: nowrap;">find<br/>targets</div>'
+            '</div></div></foreignObject><text x="60" y="44" font-size="12">find...</text></switch></g>')
+    doc = svg_of(tmp_path, body)
+    t, = doc.items
+    assert t.lines == ["find", "targets"] and t.anchor == "middle" and t.fill == "#112233"
+    assert t.x == pytest.approx(60.5) and t.line_height == pytest.approx(14.4)
+    assert t.font_family == "Helvetica"
+
+
+def test_switch_draws_only_the_first_accepted_child(tmp_path):
+    doc = svg_of(tmp_path, '<switch><g requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility"/>'
+                           '<a><text x="1" y="9">Text is not SVG - cannot display</text></a></switch>')
+    assert doc.items == []
+
+
+def test_switch_skips_unsupported_extension_and_language(tmp_path):
+    doc = svg_of(tmp_path, '<switch><text requiredExtensions="http://example.com/x" x="1" y="9">a</text>'
+                           '<text systemLanguage="de" x="1" y="9">b</text>'
+                           '<text systemLanguage="en-US" x="1" y="9">c</text><text x="1" y="9">d</text></switch>')
+    assert [t.lines for t in doc.items] == [["c"]]

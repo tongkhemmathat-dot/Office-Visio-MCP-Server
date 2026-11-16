@@ -15,6 +15,9 @@
   converts SVGs and renders them next to the browser's rendering.
 - `svg_to_visio`: font per text element (generic `serif`/`sans-serif`/`monospace` and common web fonts map to
   Windows fonts); text box widths are measured with the real font (`svg_text.py`) instead of estimated.
+- `svg_to_visio`: draw.io / diagrams.net exports keep their labels: the HTML in `<foreignObject>` is read
+  (wrapping, alignment, font, colour, bold, bullets; `svg_html.py`) instead of draw.io's truncated plain-text copy,
+  and `<switch>` follows SVG conditional processing so draw.io's "Text is not SVG" notice is not drawn.
 
 ## 1.1.0 - 2026-10-06
 
