@@ -110,6 +110,7 @@ class Text:
     halo: bool                   # white outline behind the glyphs (paint-order stroke)
     rotation: float = 0.0        # degrees, clockwise (SVG convention), about (x, y)
     opacity: float = 1.0
+    font_family: str = ""        # CSS font-family list as written in the SVG
 
 
 @dataclass
@@ -697,7 +698,8 @@ class _Parser:
             lines, px, py, size * scale, style.get("text-anchor", "start"), fill, weight in BOLD_WEIGHTS,
             dy * scale, stroke == "#FFFFFF" and parse_length(style.get("stroke-width"), 1.0) > 0,
             rotation=math.degrees(math.atan2(m[1], m[0])) if not _axis_aligned(m) or m[0] < 0 else 0.0,
-            opacity=max(0.0, min(1.0, parse_length(style.get("fill-opacity"), 1.0) * ctx.opacity))))
+            opacity=max(0.0, min(1.0, parse_length(style.get("fill-opacity"), 1.0) * ctx.opacity)),
+            font_family=style.get("font-family", "")))
         if not self.doc.font_family and style.get("font-family"):
             self.doc.font_family = style["font-family"]
 

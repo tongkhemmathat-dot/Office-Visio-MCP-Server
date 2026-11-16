@@ -13,6 +13,8 @@
 - `svg_to_visio`: a path with several subpaths is one Visio shape (even-odd fill), so glyph counters and ring
   icons keep their holes; draw.io `<switch>` and editor-namespace elements are handled; `examples/svg_compare.py`
   converts SVGs and renders them next to the browser's rendering.
+- `svg_to_visio`: font per text element (generic `serif`/`sans-serif`/`monospace` and common web fonts map to
+  Windows fonts); text box widths are measured with the real font (`svg_text.py`) instead of estimated.
 
 ## 1.1.0 - 2026-10-06
 

@@ -25,14 +25,14 @@ try:
     from visio_mcp_server.diagram import (RACK_UNIT, check_rack_fit, free_ranges, group_bounds,
                                           normalize_spec, rack_device_bottom, tier_layout)
     from visio_mcp_server.styles import apply_shape_style, style_geometry, validate_style
-    from visio_mcp_server import svg_import
+    from visio_mcp_server import svg_import, svg_text
 except ImportError:
     # Started as a plain script without the package on PYTHONPATH
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from visio_mcp_server.diagram import (RACK_UNIT, check_rack_fit, free_ranges, group_bounds,
                                           normalize_spec, rack_device_bottom, tier_layout)
     from visio_mcp_server.styles import apply_shape_style, style_geometry, validate_style
-    from visio_mcp_server import svg_import
+    from visio_mcp_server import svg_import, svg_text
 
 mcp = FastMCP("visio-server")
 
@@ -1084,14 +1084,14 @@ def svg_rgb(color: str) -> str:
     return "RGB(%d,%d,%d)" % (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
 
 
-def svg_font_id(doc, family: str) -> int:
-    """ID of the first font in a CSS font-family list that Visio knows, else the first font."""
-    wanted = [f.strip().strip("'\"").lower() for f in family.split(",") if f.strip()]
-    fonts = {doc.Fonts.Item(i).Name.lower(): doc.Fonts.Item(i).ID for i in range(1, doc.Fonts.Count + 1)}
-    for name in wanted:
-        if name in fonts:
-            return fonts[name]
-    return doc.Fonts.Item(1).ID
+def svg_font_id(doc, family: str, cache: dict) -> int:
+    """ID of the first font from a CSS font-family list that Visio knows (generic names mapped to
+    Windows fonts), else the document's first font."""
+    if family not in cache:
+        fonts = {doc.Fonts.Item(i).Name.lower(): doc.Fonts.Item(i).ID for i in range(1, doc.Fonts.Count + 1)}
+        cache[family] = next((fonts[n.lower()] for n in svg_text.font_candidates(family) if n.lower() in fonts),
+                             doc.Fonts.Item(1).ID)
+    return cache[family]
 
 
 def svg_style_fill(shape, fill, opacity: float = 1.0) -> None:
@@ -1116,10 +1116,11 @@ def svg_style_line(shape, stroke, width: float, dash, opacity: float = 1.0) -> N
         shape.CellsU("LineColorTrans").FormulaU = "%d%%" % round((1 - opacity) * 100)
 
 
-def svg_draw_text(page, item, doc_height: float, font_id: int) -> None:
+def svg_draw_text(page, item, doc_height: float, font_id: int, default_family: str = "") -> None:
     """Draw one <text> as a borderless text box whose first baseline sits at item.y."""
     fs = item.font_size
-    width = max(len(line) for line in item.lines) * fs * 0.62 + 12
+    family = item.font_family or default_family
+    width = max(svg_text.text_width(line, family, fs, item.bold) for line in item.lines) + 6
     height = item.line_height * (len(item.lines) - 1) + fs * 1.25
     top = item.y - fs * 0.95
     left = {"middle": item.x - width / 2, "end": item.x - width}.get(item.anchor, item.x)
@@ -1219,7 +1220,7 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
     page = get_page(doc)
     for cell in ("PageLeftMargin", "PageRightMargin", "PageTopMargin", "PageBottomMargin"):
         page.PageSheet.Cells(cell).ResultIU = 0
-    font_id = svg_font_id(doc, svg.font_family)
+    font_cache: dict = {}
 
     def px(x: float) -> float:
         return x * SVG_PX
@@ -1262,7 +1263,8 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                 svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
                 counts["path"] += 1
             elif isinstance(item, svg_import.Text):
-                svg_draw_text(page, item, svg.height, font_id)
+                svg_draw_text(page, item, svg.height, svg_font_id(doc, item.font_family or svg.font_family, font_cache),
+                              svg.font_family)
                 counts["text"] += 1
             elif isinstance(item, svg_import.Image):
                 picture = page.Import(svg_import.image_to_png(item.href, svg.base_dir, work_dir, f"img{i}"))
