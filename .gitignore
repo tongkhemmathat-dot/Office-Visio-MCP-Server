@@ -10,3 +10,6 @@ wheels/
 .venv
 # Internal diagrams and generators that contain real hostnames/IPs
 private/
+
+# Generated diagrams and conversion output
+output/
