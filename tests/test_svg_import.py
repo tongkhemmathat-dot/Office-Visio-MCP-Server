@@ -339,3 +339,31 @@ def test_switch_skips_unsupported_extension_and_language(tmp_path):
                            '<text systemLanguage="de" x="1" y="9">b</text>'
                            '<text systemLanguage="en-US" x="1" y="9">c</text><text x="1" y="9">d</text></switch>')
     assert [t.lines for t in doc.items] == [["c"]]
+
+
+MARKER = ('<defs><marker id="a" markerWidth="{w}" markerHeight="8" refX="9" refY="4" orient="auto" '
+          'markerUnits="{u}"><path d="M0,0 L10,4 L0,8 z" fill="{f}"/></marker></defs>')
+
+
+def arrow_line(tmp_path, w, u, f, width=2):
+    return svg_of(tmp_path, MARKER.format(w=w, u=u, f=f) +
+                  f'<polyline points="0,0 50,0" stroke="#000" stroke-width="{width}" fill="none" '
+                  'marker-end="url(#a)"/>').items[0]
+
+
+def test_marker_size_in_user_space_units(tmp_path):
+    p = arrow_line(tmp_path, 10, "userSpaceOnUse", "#000")
+    assert p.arrow_end and p.arrow_size == 10 and not p.arrow_open
+
+
+def test_marker_size_in_stroke_width_units(tmp_path):
+    assert arrow_line(tmp_path, 4, "strokeWidth", "#000", width=3).arrow_size == 12
+
+
+def test_marker_without_fill_is_open(tmp_path):
+    assert arrow_line(tmp_path, 10, "userSpaceOnUse", "none").arrow_open
+
+
+def test_missing_marker_has_unknown_size(tmp_path):
+    p = svg_of(tmp_path, '<polyline points="0,0 9,0" stroke="#000" fill="none" marker-end="url(#zzz)"/>').items[0]
+    assert p.arrow_end and p.arrow_size == 0

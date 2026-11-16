@@ -85,6 +85,8 @@ class Polyline:
     fill: Optional[str] = None
     fill_opacity: float = 1.0
     stroke_opacity: float = 1.0
+    arrow_size: float = 0.0      # arrowhead length in px from the <marker>; 0 = unknown
+    arrow_open: bool = False     # marker drawn as an outline/chevron rather than a solid head
 
 
 @dataclass
@@ -711,11 +713,32 @@ class _Parser:
         if len(placed) > 1:
             self.doc.items.append(Path([pts for pts, _ in placed], **st))
             return
+        arrow_size, arrow_open = self.marker_info(ctx.style, st["stroke_width"], _scale_of(ctx.matrix))
         for pts, closed in placed:
             self.doc.items.append(Polyline(
                 pts, closed=closed,
                 arrow_end=ctx.style.get("marker-end", "none") != "none" and not closed,
-                arrow_start=ctx.style.get("marker-start", "none") != "none" and not closed, **st))
+                arrow_start=ctx.style.get("marker-start", "none") != "none" and not closed,
+                arrow_size=arrow_size, arrow_open=arrow_open, **st))
+
+    def marker_info(self, style: Dict[str, str], stroke_width: float, scale: float) -> Tuple[float, bool]:
+        """(arrowhead length in px, drawn as outline?) from the marker used by marker-end / marker-start."""
+        for key in ("marker-end", "marker-start"):
+            m = re.match(r"url\(\s*#([^)\s]+)\s*\)", style.get(key, ""))
+            marker = self.ids.get(m.group(1)) if m else None
+            if marker is None or _local(marker.tag) != "marker":
+                continue
+            width = parse_length(marker.get("markerWidth"), 3.0)
+            units = marker.get("markerUnits", "strokeWidth")
+            length = width * (stroke_width if units == "strokeWidth" else scale)
+            shape = next((c for c in marker.iter() if _local(c.tag) in ("path", "polygon", "polyline", "circle")), None)
+            is_open = False
+            if shape is not None:
+                decl = _declarations(shape.get("style"))
+                fill = decl.get("fill", shape.get("fill", marker.get("fill", "#000000")))
+                is_open = fill.strip().lower() == "none"
+            return length, is_open
+        return 0.0, False
 
     def text(self, el, ctx: Context) -> None:
         style, m = ctx.style, ctx.matrix

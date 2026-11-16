@@ -18,6 +18,8 @@
 - `svg_to_visio`: draw.io / diagrams.net exports keep their labels: the HTML in `<foreignObject>` is read
   (wrapping, alignment, font, colour, bold, bullets; `svg_html.py`) instead of draw.io's truncated plain-text copy,
   and `<switch>` follows SVG conditional processing so draw.io's "Text is not SVG" notice is not drawn.
+- `svg_to_visio`: arrowhead size and style follow the SVG `<marker>` (length from `markerWidth`/`markerUnits`,
+  open vs solid head) instead of one fixed size.
 
 ## 1.1.0 - 2026-10-06
 

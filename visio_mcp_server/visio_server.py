@@ -1078,6 +1078,16 @@ async def export_diagram(file_path: str, output_path: str) -> str:
 SVG_PX = 1 / 96.0           # one SVG user unit in inches (CSS pixel)
 ARROW_FILLED_TRIANGLE = 13
 LINE_PATTERNS = {"dash": "2", "dot": "3"}
+ARROW_OPEN = 1                # Visio's open "V" arrowhead
+# Visio arrowhead sizes 0..4 give heads of roughly 8-12, 12-16, 16-22, 22-30, 30+ px on 1-2 px lines
+ARROW_SIZE_LIMITS = (12, 16, 22, 30)
+
+
+def svg_arrow_size(length_px: float) -> int:
+    """Visio EndArrowSize (0-4) whose head is closest to an SVG marker of the given length."""
+    if length_px <= 0:
+        return 1
+    return sum(length_px > limit for limit in ARROW_SIZE_LIMITS)
 
 
 def svg_rgb(color: str) -> str:
@@ -1254,8 +1264,8 @@ async def svg_to_visio(svg_path: str, output_path: str, export_png: Optional[str
                 svg_style_line(shape, item.stroke, item.stroke_width, item.dash, item.stroke_opacity)
                 for flag, cell in ((item.arrow_end, "EndArrow"), (item.arrow_start, "BeginArrow")):
                     if flag:
-                        shape.CellsU(cell).FormulaU = str(ARROW_FILLED_TRIANGLE)
-                        shape.CellsU(cell + "Size").FormulaU = "1"
+                        shape.CellsU(cell).FormulaU = str(ARROW_OPEN if item.arrow_open else ARROW_FILLED_TRIANGLE)
+                        shape.CellsU(cell + "Size").FormulaU = str(svg_arrow_size(item.arrow_size))
                 counts["polyline"] += 1
             elif isinstance(item, svg_import.Path):
                 shape = svg_draw_path(page, item, px, py)
